@@ -10,10 +10,12 @@ FetchContent_Declare(glm       GIT_REPOSITORY https://github.com/g-truc/glm     
 FetchContent_Declare(entt      GIT_REPOSITORY https://github.com/skypjack/entt       GIT_TAG master )
 FetchContent_MakeAvailable(lua-cmake glm entt)
 
+add_subdirectory(vendor/stb)
+
 add_executable(${PROJECT_NAME} 
   src/main.cpp
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm EnTT::EnTT)
+target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm EnTT::EnTT stb)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_23)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")

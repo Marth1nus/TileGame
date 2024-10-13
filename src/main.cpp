@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <stb_image.h>
+
 #undef assert
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -28,52 +30,9 @@
 #include <GLFW/glfw3.h>
 #endif
 
-auto static texture_slot_count = 16;
-
-static char vert_glsl[]{R"glsl(
-  #version 300 es
-  layout(location = 0) in vec2 mesh_pos;
-  layout(location = 1) in vec2 mesh_uv_pos;
-  layout(location = 2) in vec2 instance_pos;
-  layout(location = 3) in vec2 instance_size;
-  layout(location = 4) in vec2 instance_uv_pos;
-  layout(location = 5) in vec2 instance_uv_size;
-  layout(location = 6) in uint instance_tex;
-
-  uniform mat4 projection;
-
-  out vec2 pos;
-  out vec2 uv;
-  flat out uint tex;
-
-  void main()
-  {
-    pos = instance_pos + instance_size * mesh_pos;
-    uv = instance_uv_pos + instance_uv_size * mesh_uv_pos;
-    tex = instance_tex;
-    gl_Position = projection * vec4(pos, 0, 1);
-    gl_Position
-  }
-)glsl"};
-
-static char frag_glsl[]{R"glsl(
-  #version 300 es
-  precision mediump float;
-  precision mediump sampler2D;
-
-  in vec2 pos;
-  in vec2 uv;
-  flat in uint tex;
-
-  uniform sampler2D textures[####];
-
-  out vec4 color;
-
-  void main()
-  {
-    color = texture(textures[tex], uv);
-  }
-)glsl"};
+using glm::vec2, glm::uint,
+    std::literals::operator""sv,
+    std::literals::operator""s;
 
 namespace utils
 {
@@ -104,25 +63,65 @@ namespace utils
     }
   }
 
+  auto static inline file_read_all(char const *filepath) -> std::string
+  {
+    std::string res;
+    auto file = std::fopen(filepath, "r");
+    if (not file)
+      return res;
+    std::fseek(file, 0, SEEK_END), res.resize(std::ftell(file));
+    std::fseek(file, 0, SEEK_SET), res.resize(std::fread(res.data(), sizeof(res.front()), res.size(), file));
+    std::fclose(file);
+    return res;
+  }
+
   template <typename T>
   struct shared
   {
-    std::shared_ptr<T> ptr;
+    using ptr_t = std::shared_ptr<T>;
+    ptr_t ptr;
+
     inline constexpr shared() noexcept = default;
     inline constexpr shared(shared &&) noexcept = default;
     inline constexpr shared(shared const &) noexcept = default;
     inline constexpr shared &operator=(shared &&) noexcept = default;
     inline constexpr shared &operator=(shared const &) noexcept = default;
 
-    inline constexpr shared(std::shared_ptr<T> ptr) noexcept : ptr(std::move(ptr)) {}
-    inline constexpr operator std::shared_ptr<T> const &() const noexcept { return ptr; }
+    inline constexpr shared(ptr_t ptr) noexcept : ptr(std::move(ptr)) {}
+    inline constexpr operator ptr_t const &() const noexcept { return ptr; }
 
     inline constexpr shared(T *ptr, auto &&deleter) noexcept : ptr(ptr, std::forward<decltype(deleter)>(deleter)) {}
     inline constexpr operator T *() const noexcept { return ptr.get(); }
   };
+
+  template <typename T, typename VT>
+  concept sized_range_value_convertible_to = std::ranges::sized_range<T> and std::convertible_to<std::ranges::range_value_t<T>, VT>;
 }
 #define ASSERT(...) utils::assert((__VA_ARGS__), #__VA_ARGS__)
 using utils::shared, utils::glCheckError;
+
+static auto texture_slot_count = 16;
+
+static auto apply_glsl_format_variables(std::span<char> glsl)
+{
+  while (true)
+  {
+    char buf[] = "{texture_slot_count}";
+    auto offset = std::string_view{glsl}.find(buf);
+    if (offset == std::string_view::npos)
+      break;
+    std::snprintf(buf, std::size(buf), "%*d", (int)std::size(buf) - 1, texture_slot_count);
+    std::ranges::copy(std::string_view{buf}, glsl.data() + offset);
+    glsl = glsl.subspan(offset + std::size(buf) - 1);
+  }
+}
+[[nodiscard("Returns the file contents with formatted variables")]]
+static auto load_glsl_from_file(char const *filepath)
+{
+  auto res = utils::file_read_all(filepath);
+  apply_glsl_format_variables(res);
+  return res;
+}
 
 static struct glfw
 {
@@ -147,30 +146,35 @@ static inline auto window_init(int width = 720, int height = -1, char const *tit
   glCheckError();
 
   glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slot_count);
-  [&] { // replace textures array size in frag_glsl
-    auto target = std::span<char>(frag_glsl);
-    auto find = std::string_view{};
-    auto offset = size_t{};
-    // find definition
-    offset = std::string_view{target}.find(find = "uniform sampler2D textures[####];");
-    if (offset == std::string_view::npos or target.size() - offset < find.size())
-      return;
-    target = target.subspan(offset, find.size());
-    // find size
-    offset = std::string_view{target}.find(find = "[####]");
-    if (offset == std::string_view::npos or target.size() - offset < find.size())
-      return;
-    target = target.subspan(offset, find.size());
-    // replace size
-    std::snprintf(target.data(), target.size(), "[%4d\0", texture_slot_count);
-    target[find.size() - 1] = find.back();
-  }();
 }
 
-static GLuint vao, vertices_vbo, instances_vbo;
+static GLuint tile_sets_ubo;
+struct tile_set
+{
+  uint first, last, columns, tex;
+};
+static auto tile_sets = std::vector<tile_set>{};
+static inline auto tile_sets_init()
+{
+  glGenBuffers(1, &tile_sets_ubo);
+  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, tile_sets_ubo);
+}
+static inline auto tile_sets_upload()
+{
+  auto static constinit capacity = size_t(0);
+  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
+  if (capacity not_eq tile_sets.capacity())
+    glBufferData(GL_UNIFORM_BUFFER, (capacity = tile_sets.capacity()) * sizeof(tile_sets.at(0)), nullptr, GL_DYNAMIC_READ);
+  if (auto bytes = std::as_bytes(std::span(tile_sets)); not bytes.empty())
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes.size(), bytes.data());
+  glCheckError();
+}
+
+static GLuint vao, vertices_vbo, instances_vbo, tiles_vbo;
 struct vertex
 {
-  glm::vec2 pos, uv;
+  vec2 pos, uv;
 };
 static auto constexpr vertices = std::array{
     vertex{{0, 0}, {0, 0}},
@@ -180,18 +184,21 @@ static auto constexpr vertices = std::array{
 };
 struct instance
 {
-  glm::vec2 pos, size, uv_pos, uv_size;
+  vec2 pos, size, uv_pos, uv_size;
   glm::uint tex;
 };
 static auto instances = std::vector<instance>{};
+static auto tiles = std::vector<uint32_t>{};
 
 static inline auto vao_init()
 {
-  glGenVertexArrays(1, &vao);
-  GLuint buffers[]{vertices_vbo, instances_vbo};
-  glGenBuffers((GLsizei)std::size(buffers), buffers);
-  (vertices_vbo = buffers[0]), (instances_vbo = buffers[1]);
+  auto buffers = std::array<GLuint, 3>{};
+  glGenBuffers((GLsizei)buffers.size(), buffers.data());
+  vertices_vbo /*  */ = buffers.at(0);
+  instances_vbo /* */ = buffers.at(1);
+  tiles_vbo /*     */ = buffers.at(2);
 
+  glGenVertexArrays(1, &vao);
   glBindVertexArray(vao);
   auto bytes = std::span<std::byte const>{};
 
@@ -227,6 +234,16 @@ static inline auto vao_init()
   glVertexAttribDivisor(6, 1);
   glEnableVertexAttribArray(6);
   glCheckError();
+
+  bytes = std::as_bytes(std::span(tiles));
+  glBindBuffer(GL_ARRAY_BUFFER, tiles_vbo);
+  glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_DYNAMIC_DRAW);
+  glCheckError();
+
+  glVertexAttribPointer(7, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(uint32_t), 0);
+  glVertexAttribDivisor(7, 1);
+  glEnableVertexAttribArray(7);
+  glCheckError();
 }
 static inline auto instances_upload()
 {
@@ -238,43 +255,60 @@ static inline auto instances_upload()
     glBufferSubData(GL_ARRAY_BUFFER, 0, bytes.size(), bytes.data());
   glCheckError();
 }
+static inline auto tiles_upload()
+{
+  auto static constinit capacity = size_t(0);
+  glBindBuffer(GL_ARRAY_BUFFER, tiles_vbo);
+  if (capacity not_eq tiles.capacity())
+    glBufferData(GL_ARRAY_BUFFER, GLsizei((capacity = tiles.capacity()) * sizeof(tiles.at(0))), nullptr, GL_DYNAMIC_DRAW);
+  if (auto bytes = std::as_bytes(std::span(tiles)); not bytes.empty())
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizei)bytes.size(), bytes.data());
+  glCheckError();
+}
 
 static GLuint vid, fid, pid;
 static struct
 {
-  GLint projection, textures;
+  GLint projection,
+      use_tiles,
+      TILE_SETS,
+      tile_chunk_columns,
+      textures;
 } uniform{};
 
-[[nodiscard]]
+[[nodiscard("Return is a new shader handle (Manual deletion required)")]]
 static auto make_shader(GLenum type, std::string_view glsl)
 {
   auto sid = glCreateShader(type);
-  auto str = glsl.data();
-  auto len = (GLsizei)glsl.size();
+  auto off = glsl.find("#version");
+  off = off == std::string_view::npos ? 0 : off;
+  auto str = glsl.data() + off;
+  auto len = GLsizei(glsl.size() - off);
   glShaderSource(sid, 1, &str, &len);
   glCompileShader(sid);
-  if (GLint status, len;
-      glGetShaderiv(sid, GL_COMPILE_STATUS, &status), not status)
+  if (GLint status, len; glGetShaderiv(sid, GL_COMPILE_STATUS, &status), not status)
   {
     std::string log;
     log.resize((glGetShaderiv(sid, GL_INFO_LOG_LENGTH, &len), len));
     log.resize((glGetShaderInfoLog(sid, len, &len, log.data()), len));
-    std::fprintf(stderr, "Shader Error: %s", log.c_str());
+    std::fprintf(stderr, "%s Shader Error: %s", type == GL_VERTEX_SHADER ? "Vertex" : "Fragment", log.c_str());
     glDeleteShader(sid), sid = 0;
   }
   glCheckError();
   return sid;
 }
-static auto pid_init(std::string_view vert_glsl = ::vert_glsl, std::string_view frag_glsl = ::frag_glsl)
+static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
 {
+  pid and (glDeleteProgram(pid), 1);
+  vid and (glDeleteShader(vid), 1);
+  fid and (glDeleteShader(fid), 1);
   pid = glCreateProgram();
   vid = make_shader(GL_VERTEX_SHADER, vert_glsl);
   fid = make_shader(GL_FRAGMENT_SHADER, frag_glsl);
   glAttachShader(pid, vid);
   glAttachShader(pid, fid);
   glLinkProgram(pid);
-  if (GLint status, len;
-      glGetProgramiv(pid, GL_LINK_STATUS, &status), not status)
+  if (GLint status, len; glGetProgramiv(pid, GL_LINK_STATUS, &status), not status)
   {
     std::string log;
     log.resize((glGetProgramiv(pid, GL_INFO_LOG_LENGTH, &len), len));
@@ -286,48 +320,120 @@ static auto pid_init(std::string_view vert_glsl = ::vert_glsl, std::string_view 
   glCheckError();
 
   glUseProgram(pid);
-  uniform.projection = glGetUniformLocation(pid, "projection");
-  uniform.textures = glGetUniformLocation(pid, "textures");
+  uniform.projection /*         */ = glGetUniformLocation(pid, "projection" /*         */);
+  uniform.use_tiles /*          */ = glGetUniformLocation(pid, "use_tiles" /*          */);
+  uniform.TILE_SETS /*          */ = glGetUniformBlockIndex(pid, "TILE_SETS" /*        */);
+  uniform.tile_chunk_columns /* */ = glGetUniformLocation(pid, "tile_chunk_columns" /* */);
+  uniform.textures /*           */ = glGetUniformLocation(pid, "textures" /*           */);
   glCheckError();
 
-  if (uniform.textures >= 0)
-  {
-    auto textures = std::vector<int>(texture_slot_count);
-    for (auto i = 0; auto &t : textures)
-      t = i++;
-    glUniform1iv(uniform.textures, (GLsizei)textures.size(), textures.data());
-  }
+  auto projection = glm::mat4(1);
+  auto textures = std::views::iota(0, texture_slot_count) | std::ranges::to<std::vector>();
+
+  glUniformMatrix4fv(uniform.projection, 1, 0, &projection[0][0]);
+  glUniform1ui(uniform.use_tiles, true);
+  glUniformBlockBinding(pid, uniform.TILE_SETS, 0);
+  glUniform1ui(uniform.tile_chunk_columns, 1);
+  glUniform1iv(uniform.textures, (GLsizei)texture_slot_count, textures.data());
   glCheckError();
+}
+
+auto textures = std::vector<GLuint>{};
+static auto textures_load(utils::sized_range_value_convertible_to<char const *> auto const &files)
+{
+  if (not textures.empty())
+    glDeleteTextures((GLsizei)textures.size(), textures.data());
+  textures.resize(std::min<size_t>(std::size(files), texture_slot_count));
+  glGenTextures((GLsizei)textures.size(), textures.data());
+  for (auto i = 0; auto &&path : files)
+  {
+    glBindTexture(GL_TEXTURE_2D, textures.at(i++));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+    auto width = 1, height = 1, channels = 4;
+    auto pixels = ASSERT(stbi_load(path, &width, &height, &channels, channels));
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    stbi_image_free(pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glCheckError();
+  }
 }
 
 static inline void setup()
 {
   window_init();
+  tile_sets_init();
   vao_init();
-  pid_init();
-
+  pid_init(load_glsl_from_file("shaders/vert.glsl"),
+           load_glsl_from_file("shaders/frag.glsl"));
   glClearColor(0.1, 0.1, 0.1, 0.1);
   glfwSwapInterval(1);
 
   glUseProgram(pid);
-  auto projection = glm::ortho<float>(0, 8, 0, 8);
+  auto projection = glm::ortho<float>(0, 2, 0, 2);
+  // projection = glm::ortho<float>(0, 42, 0, 38);
   glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
 
-  for (auto i = 1; i < 7; i++)
-    for (auto j = 1; j < 7; j++)
-      instances.push_back(instance{.pos{i, j}, .size{1, 1}, .uv_pos{0, 0}, .uv_size{1, 1}, .tex = uint32_t(i + j)});
+  textures_load(std::array{
+      "images/gfx/cave.png",      // 0
+      "images/gfx/character.png", // 1
+      "images/gfx/font.png",      // 2
+      "images/gfx/Inner.png",     // 3
+      "images/gfx/log.png",       // 4
+      "images/gfx/NPC_test.png",  // 5
+      "images/gfx/objects.png",   // 6
+      "images/gfx/Overworld.png", // 7
+  });
+
+  auto sprite = [tex = 3](vec2 p, vec2 up, uint tex = 0) mutable
+  { return instance{
+        .pos = p,
+        .size = vec2(1),
+        .uv_pos = up / vec2(40.f, 36.f) * 0.0f + 0.0f,
+        .uv_size = vec2(1) / vec2(40.f, 36.f) * 0.0f + 1.0f,
+        .tex = tex++,
+    }; };
+  instances = {
+      sprite({0, 0}, {0, 6}),
+      sprite({0, 1}, {0, 7}),
+      sprite({1, 0}, {1, 6}),
+      sprite({1, 1}, {1, 7}),
+  };
   instances_upload();
+
+  tile_sets = {
+      tile_set{.first = 0, .last = 40 * 36, .columns = 40, .tex = 7},
+  };
+  tile_sets_upload();
+
+  tiles = std::views::iota(0ui32, 40 * 36ui32) | std::ranges::to<std::vector>();
+  tiles_upload();
 
   glCheckError();
 }
 
 static inline void loop()
 {
+  pid_init(load_glsl_from_file("shaders/vert.glsl"),
+           load_glsl_from_file("shaders/frag.glsl"));
+
   glClear(GL_COLOR_BUFFER_BIT);
 
   glUseProgram(pid);
   glBindVertexArray(vao);
+
+  for (auto [i, tex] : textures | std::views::enumerate | std::views::reverse)
+    glActiveTexture(GL_TEXTURE0 + i), glBindTexture(GL_TEXTURE_2D, tex);
+
   glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)instances.size());
+  glCheckError();
+
+  glUniform1ui(uniform.use_tiles, true);
+  glUniform1ui(uniform.tile_chunk_columns, 40);
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tiles.size());
+  glUniform1ui(uniform.use_tiles, false);
   glCheckError();
 
   glfwSwapBuffers(window);
