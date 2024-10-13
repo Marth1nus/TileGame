@@ -12,9 +12,10 @@ in uint tile;
 uniform mat4 projection;
 uniform bool use_tiles;
 uniform uint columns;
-struct tile_set { uint first, last, columns, tex; };
+struct tile_set { uint first, last, columns, rows, tex, padding[3]; };
 uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
 
+out vec2 mpos;
 out vec2 pos;
 out vec2 uv;
 flat out uint tex;
@@ -27,19 +28,24 @@ void main()
     vec2(1, 0), 
     vec2(1, 1)
   )[gl_VertexID];
+  mpos = mesh_pos;
   if (use_tiles)
   {
-    vec2 tile_pos = vec2(uint(gl_InstanceID) % columns, uint(gl_InstanceID) / columns);
+    uint id = uint(gl_InstanceID);
+    vec2 tile_pos = vec2(id % columns, id / columns);
     vec2 tile_size = vec2(1);
-    uint id = tile, i = 0u;
+
+    id = tile;
+    uint i = 0u;
     for (; i < TEXTURE_SLOTS; i++)
       if (tile_sets[i].first <= id && id <= tile_sets[i].last)
         break;
     tile_set ts = tile_sets[i];
-    uint ts_rows = (ts.last - ts.first + 1u) / ts.columns;
     id -= ts.first;
+
     vec2 tile_uv_pos = vec2(id % ts.columns, id / ts.columns);
-    vec2 tile_uv_size = 1.0f / vec2(uvec2(ts.columns, ts_rows));
+    vec2 tile_uv_size = 1.0f / vec2(uvec2(ts.columns, ts.rows));
+
     pos = (tile_pos    + mesh_pos) * tile_size   ;
     uv  = (tile_uv_pos + mesh_pos) * tile_uv_size;
     tex = ts.tex;

@@ -155,7 +155,8 @@ struct instance
 };
 struct tile_set
 {
-  uint first, last, columns, tex;
+  uint first, last, columns, rows,
+      tex, padding[3];
 };
 static auto vao = GLuint{};
 static auto vbos = std::array<GLuint, 3>{};
@@ -247,7 +248,7 @@ static struct
       columns,
       textures;
 } uniform{};
-auto projection = glm::ortho<float>(0, 8, 0, 8);
+auto projection = glm::ortho<float>(0, 41, 0, 37);
 
 [[nodiscard("Return is a new shader handle (Manual deletion required)")]]
 static auto make_shader(GLenum type, std::string_view glsl)
@@ -354,20 +355,15 @@ static inline void setup()
   });
 
   instances = {
-      instance{.pos{1, 1}, .tex = 0},
-      instance{.pos{3, 1}, .tex = 1},
-      instance{.pos{5, 1}, .tex = 2},
-      instance{.pos{1, 3}, .tex = 3},
-      instance{.pos{3, 3}, .tex = 4},
-      instance{.pos{5, 3}, .tex = 5},
-      instance{.pos{1, 5}, .tex = 6},
-      instance{.pos{3, 5}, .tex = 7},
-      instance{.pos{5, 5}, .tex = 6},
+      instance{.pos{06, 06}, .size{5, 5}, .tex = 0},
+      instance{.pos{12, 06}, .size{5, 5}, .tex = 1},
+      instance{.pos{06, 12}, .size{5, 5}, .tex = 2},
+      instance{.pos{12, 12}, .size{5, 5}, .tex = 3},
   };
   instances_upload();
 
   tile_sets = {
-      tile_set{.first = 0, .last = 40 * 36, .columns = 40, .tex = 7},
+      tile_set{.first = 0, .last = 40 * 36, .columns = 40, .rows = 36, .tex = 7},
   };
   tile_sets_upload();
 
@@ -392,13 +388,13 @@ static inline void loop()
 
   glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
 
-  glUniform1ui(uniform.use_tiles, false);
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)instances.size());
-  glCheckError();
-
   glUniform1ui(uniform.use_tiles, true);
   glUniform1ui(uniform.columns, 40);
   glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)tiles.size());
+  glCheckError();
+
+  glUniform1ui(uniform.use_tiles, false);
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)instances.size());
   glCheckError();
 
   glfwSwapBuffers(window);
