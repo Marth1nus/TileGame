@@ -148,91 +148,49 @@ static inline auto window_init(int width = 720, int height = -1, char const *tit
   glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slot_count);
 }
 
-static GLuint tile_sets_ubo;
+struct instance
+{
+  vec2 pos{0, 0}, size{1, 1}, uv_pos{0, 0}, uv_size{1, 1};
+  uint tex{0};
+};
 struct tile_set
 {
   uint first, last, columns, tex;
 };
-static auto tile_sets = std::vector<tile_set>{};
-static inline auto tile_sets_init()
-{
-  glGenBuffers(1, &tile_sets_ubo);
-  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 0, tile_sets_ubo);
-}
-static inline auto tile_sets_upload()
-{
-  auto static constinit capacity = size_t(0);
-  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
-  if (capacity not_eq tile_sets.capacity())
-    glBufferData(GL_UNIFORM_BUFFER, (capacity = tile_sets.capacity()) * sizeof(tile_sets.at(0)), nullptr, GL_DYNAMIC_READ);
-  if (auto bytes = std::as_bytes(std::span(tile_sets)); not bytes.empty())
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes.size(), bytes.data());
-  glCheckError();
-}
-
-static GLuint vao, vertices_vbo, instances_vbo, tiles_vbo;
-struct vertex
-{
-  vec2 pos, uv;
-};
-static auto constexpr vertices = std::array{
-    vertex{{0, 0}, {0, 0}},
-    vertex{{0, 1}, {0, 1}},
-    vertex{{1, 0}, {1, 0}},
-    vertex{{1, 1}, {1, 1}},
-};
-struct instance
-{
-  vec2 pos, size, uv_pos, uv_size;
-  glm::uint tex;
-};
+static auto vao = GLuint{};
+static auto vbos = std::array<GLuint, 3>{};
+static auto const &[instances_vbo, tiles_vbo, tile_sets_ubo] = vbos;
 static auto instances = std::vector<instance>{};
 static auto tiles = std::vector<uint32_t>{};
+static auto tile_sets = std::vector<tile_set>{};
 
 static inline auto vao_init()
 {
-  auto buffers = std::array<GLuint, 3>{};
-  glGenBuffers((GLsizei)buffers.size(), buffers.data());
-  vertices_vbo /*  */ = buffers.at(0);
-  instances_vbo /* */ = buffers.at(1);
-  tiles_vbo /*     */ = buffers.at(2);
-
   glGenVertexArrays(1, &vao);
+  glGenBuffers((GLsizei)vbos.size(), vbos.data());
+
   glBindVertexArray(vao);
   auto bytes = std::span<std::byte const>{};
-
-  bytes = std::as_bytes(std::span(vertices));
-  glBindBuffer(GL_ARRAY_BUFFER, vertices_vbo);
-  glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_STATIC_DRAW);
-  glCheckError();
-
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, pos));
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, uv));
-  glEnableVertexAttribArray(1);
-  glCheckError();
+  auto i = 0;
 
   bytes = std::as_bytes(std::span(instances));
   glBindBuffer(GL_ARRAY_BUFFER, instances_vbo);
   glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_DYNAMIC_DRAW);
   glCheckError();
 
-  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(instance), (void *)offsetof(instance, pos));
-  glVertexAttribDivisor(2, 1);
-  glEnableVertexAttribArray(2);
-  glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(instance), (void *)offsetof(instance, size));
-  glVertexAttribDivisor(3, 1);
-  glEnableVertexAttribArray(3);
-  glVertexAttribPointer(4, 2, GL_FLOAT, GL_FALSE, sizeof(instance), (void *)offsetof(instance, uv_pos));
-  glVertexAttribDivisor(4, 1);
-  glEnableVertexAttribArray(4);
-  glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, sizeof(instance), (void *)offsetof(instance, uv_size));
-  glVertexAttribDivisor(5, 1);
-  glEnableVertexAttribArray(5);
-  glVertexAttribPointer(6, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(instance), (void *)offsetof(instance, tex));
-  glVertexAttribDivisor(6, 1);
-  glEnableVertexAttribArray(6);
+  for (auto offset : {offsetof(instance, pos),
+                      offsetof(instance, size),
+                      offsetof(instance, uv_pos),
+                      offsetof(instance, uv_size)})
+  {
+    glVertexAttribPointer(i, 2, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(instance), (void *)offset);
+    glVertexAttribDivisor(i, 1);
+    glEnableVertexAttribArray(i++);
+    glCheckError();
+  }
+  glVertexAttribIPointer(i, 1, GL_UNSIGNED_INT, (GLsizei)sizeof(instance), (void *)offsetof(instance, tex));
+  glVertexAttribDivisor(i, 1);
+  glEnableVertexAttribArray(i++);
   glCheckError();
 
   bytes = std::as_bytes(std::span(tiles));
@@ -240,9 +198,13 @@ static inline auto vao_init()
   glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_DYNAMIC_DRAW);
   glCheckError();
 
-  glVertexAttribPointer(7, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(uint32_t), 0);
-  glVertexAttribDivisor(7, 1);
-  glEnableVertexAttribArray(7);
+  glVertexAttribIPointer(i, 1, GL_UNSIGNED_INT, sizeof(tiles.at(0)), (void *)0);
+  glVertexAttribDivisor(i, 1);
+  glEnableVertexAttribArray(i++);
+  glCheckError();
+
+  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, tile_sets_ubo);
   glCheckError();
 }
 static inline auto instances_upload()
@@ -265,6 +227,16 @@ static inline auto tiles_upload()
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizei)bytes.size(), bytes.data());
   glCheckError();
 }
+static inline auto tile_sets_upload()
+{
+  auto static constinit capacity = size_t(0);
+  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
+  if (capacity not_eq tile_sets.capacity())
+    glBufferData(GL_UNIFORM_BUFFER, (capacity = tile_sets.capacity()) * sizeof(tile_sets.at(0)), nullptr, GL_DYNAMIC_READ);
+  if (auto bytes = std::as_bytes(std::span(tile_sets)); not bytes.empty())
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes.size(), bytes.data());
+  glCheckError();
+}
 
 static GLuint vid, fid, pid;
 static struct
@@ -272,9 +244,10 @@ static struct
   GLint projection,
       use_tiles,
       TILE_SETS,
-      tile_chunk_columns,
+      columns,
       textures;
 } uniform{};
+auto projection = glm::ortho<float>(0, 8, 0, 8);
 
 [[nodiscard("Return is a new shader handle (Manual deletion required)")]]
 static auto make_shader(GLenum type, std::string_view glsl)
@@ -320,20 +293,19 @@ static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
   glCheckError();
 
   glUseProgram(pid);
-  uniform.projection /*         */ = glGetUniformLocation(pid, "projection" /*         */);
-  uniform.use_tiles /*          */ = glGetUniformLocation(pid, "use_tiles" /*          */);
-  uniform.TILE_SETS /*          */ = glGetUniformBlockIndex(pid, "TILE_SETS" /*        */);
-  uniform.tile_chunk_columns /* */ = glGetUniformLocation(pid, "tile_chunk_columns" /* */);
-  uniform.textures /*           */ = glGetUniformLocation(pid, "textures" /*           */);
+  uniform.projection /* */ = glGetUniformLocation(pid, "projection" /*  */);
+  uniform.use_tiles /*  */ = glGetUniformLocation(pid, "use_tiles" /*   */);
+  uniform.TILE_SETS /*  */ = glGetUniformBlockIndex(pid, "TILE_SETS" /* */);
+  uniform.columns /*    */ = glGetUniformLocation(pid, "columns" /*     */);
+  uniform.textures /*   */ = glGetUniformLocation(pid, "textures" /*    */);
   glCheckError();
 
-  auto projection = glm::mat4(1);
   auto textures = std::views::iota(0, texture_slot_count) | std::ranges::to<std::vector>();
 
   glUniformMatrix4fv(uniform.projection, 1, 0, &projection[0][0]);
   glUniform1ui(uniform.use_tiles, true);
   glUniformBlockBinding(pid, uniform.TILE_SETS, 0);
-  glUniform1ui(uniform.tile_chunk_columns, 1);
+  glUniform1ui(uniform.columns, 1);
   glUniform1iv(uniform.textures, (GLsizei)texture_slot_count, textures.data());
   glCheckError();
 }
@@ -364,17 +336,11 @@ static auto textures_load(utils::sized_range_value_convertible_to<char const *> 
 static inline void setup()
 {
   window_init();
-  tile_sets_init();
   vao_init();
   pid_init(load_glsl_from_file("shaders/vert.glsl"),
            load_glsl_from_file("shaders/frag.glsl"));
   glClearColor(0.1, 0.1, 0.1, 0.1);
   glfwSwapInterval(1);
-
-  glUseProgram(pid);
-  auto projection = glm::ortho<float>(0, 2, 0, 2);
-  // projection = glm::ortho<float>(0, 42, 0, 38);
-  glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
 
   textures_load(std::array{
       "images/gfx/cave.png",      // 0
@@ -387,19 +353,16 @@ static inline void setup()
       "images/gfx/Overworld.png", // 7
   });
 
-  auto sprite = [tex = 3](vec2 p, vec2 up, uint tex = 0) mutable
-  { return instance{
-        .pos = p,
-        .size = vec2(1),
-        .uv_pos = up / vec2(40.f, 36.f) * 0.0f + 0.0f,
-        .uv_size = vec2(1) / vec2(40.f, 36.f) * 0.0f + 1.0f,
-        .tex = tex++,
-    }; };
   instances = {
-      sprite({0, 0}, {0, 6}),
-      sprite({0, 1}, {0, 7}),
-      sprite({1, 0}, {1, 6}),
-      sprite({1, 1}, {1, 7}),
+      instance{.pos{1, 1}, .tex = 0},
+      instance{.pos{3, 1}, .tex = 1},
+      instance{.pos{5, 1}, .tex = 2},
+      instance{.pos{1, 3}, .tex = 3},
+      instance{.pos{3, 3}, .tex = 4},
+      instance{.pos{5, 3}, .tex = 5},
+      instance{.pos{1, 5}, .tex = 6},
+      instance{.pos{3, 5}, .tex = 7},
+      instance{.pos{5, 5}, .tex = 6},
   };
   instances_upload();
 
@@ -427,13 +390,15 @@ static inline void loop()
   for (auto [i, tex] : textures | std::views::enumerate | std::views::reverse)
     glActiveTexture(GL_TEXTURE0 + i), glBindTexture(GL_TEXTURE_2D, tex);
 
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)instances.size());
+  glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
+
+  glUniform1ui(uniform.use_tiles, false);
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)instances.size());
   glCheckError();
 
   glUniform1ui(uniform.use_tiles, true);
-  glUniform1ui(uniform.tile_chunk_columns, 40);
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tiles.size());
-  glUniform1ui(uniform.use_tiles, false);
+  glUniform1ui(uniform.columns, 40);
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)tiles.size());
   glCheckError();
 
   glfwSwapBuffers(window);

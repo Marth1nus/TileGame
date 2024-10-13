@@ -1,57 +1,55 @@
 #version 300 es
-#define TEXTURE_SLOTS {texture_slot_count}
+#define TEXTURE_SLOTS {texture_slot_count}u
 
-layout(location = 0) in vec2 mesh_pos;
-layout(location = 1) in vec2 mesh_uv_pos;
-layout(location = 2) in vec2 instance_pos;
-layout(location = 3) in vec2 instance_size;
-layout(location = 4) in vec2 instance_uv_pos;
-layout(location = 5) in vec2 instance_uv_size;
-layout(location = 6) in uint instance_tex;
-layout(location = 7) in uint tile_id;
+in vec2 mesh_uv_pos;
+in vec2 instance_pos;
+in vec2 instance_size;
+in vec2 instance_uv_pos;
+in vec2 instance_uv_size;
+in uint instance_tex;
+in uint tile;
 
 uniform mat4 projection;
 uniform bool use_tiles;
+uniform uint columns;
+struct tile_set { uint first, last, columns, tex; };
+uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
 
 out vec2 pos;
 out vec2 uv;
 flat out uint tex;
-out vec2 mpos;
-
-void tile_main();
 
 void main()
 {
-  mpos = mesh_pos;
-  if (use_tiles) { tile_main(); return; }
-  pos = instance_pos + instance_size * mesh_pos;
-  uv = instance_uv_pos + instance_uv_size * mesh_uv_pos;
-  tex = instance_tex;
+  vec2 mesh_pos = vec2[4](
+    vec2(0, 0), 
+    vec2(0, 1), 
+    vec2(1, 0), 
+    vec2(1, 1)
+  )[gl_VertexID];
+  if (use_tiles)
+  {
+    vec2 tile_pos = vec2(uint(gl_InstanceID) % columns, uint(gl_InstanceID) / columns);
+    vec2 tile_size = vec2(1);
+    uint id = tile, i = 0u;
+    for (; i < TEXTURE_SLOTS; i++)
+      if (tile_sets[i].first <= id && id <= tile_sets[i].last)
+        break;
+    tile_set ts = tile_sets[i];
+    uint ts_rows = (ts.last - ts.first + 1u) / ts.columns;
+    id -= ts.first;
+    vec2 tile_uv_pos = vec2(id % ts.columns, id / ts.columns);
+    vec2 tile_uv_size = 1.0f / vec2(uvec2(ts.columns, ts_rows));
+    pos = (tile_pos    + mesh_pos) * tile_size   ;
+    uv  = (tile_uv_pos + mesh_pos) * tile_uv_size;
+    tex = ts.tex;
+  }
+  else
+  {
+    pos = instance_pos    + instance_size    * mesh_pos;
+    uv  = instance_uv_pos + instance_uv_size * mesh_pos;
+    tex = instance_tex;
+  }
   gl_Position = projection * vec4(pos, 0, 1);
-  gl_Position.y *= -1.0f;
-}
-
-// =====================================================================================================================
-// == Tiles ============================================================================================================
-// =====================================================================================================================
-
-struct tile_set { uint first, last, columns, tex; };
-uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
-uniform uint tile_chunk_columns;
-
-void tile_main()
-{
-  uint tid = tile_id, tile_set_i = uint(0);
-  for (uint i = uint(0); i < uint(TEXTURE_SLOTS); i++)
-    if (tile_sets[i].first <= tid && tid <= tile_sets[i].last)
-      tile_set_i = i;
-  tile_set ts = tile_sets[tile_set_i];
-  tid -= ts.first;
-  vec2 uv_size = vec2(1.0f) / vec2(uvec2(ts.columns, (ts.last - ts.first + uint(1)) / ts.columns));
-  uint iid = uint(gl_InstanceID);
-  pos = vec2(uvec2(iid % tile_chunk_columns, iid / tile_chunk_columns)) + mesh_pos;
-  uv  = vec2(uvec2(tid % ts.columns        , tid / ts.columns        )) + mesh_pos * uv_size;
-  tex = ts.tex;
-  gl_Position = projection * vec4(pos, 0, 1);
-  gl_Position.y *= -1.0f;
+  gl_Position.y = -gl_Position.y;
 }
