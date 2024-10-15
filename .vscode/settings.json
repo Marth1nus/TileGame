@@ -5,6 +5,7 @@
     "FRAMEBUFFER",
     "gles",
     "GLFW",
+    "glsl",
     "Integerv",
     "Lsizei",
     "mediump",

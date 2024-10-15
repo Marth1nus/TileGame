@@ -19,8 +19,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm EnTT::EnTT stb)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_23)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
-  target_link_options(${PROJECT_NAME} PUBLIC -sUSE_GLFW=3 -sUSE_WEBGL2=1)
-  set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${PROJECT_NAME} SUFFIX ".html")
+  set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${PROJECT_NAME}" SUFFIX ".html")
+  target_link_options(${PROJECT_NAME} PRIVATE
+    -sUSE_GLFW=3 
+    -sUSE_WEBGL2=1 
+    -sFULL_ES3=1 
+    -std=c++23
+    --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/res@res
+  )
 
 else()
   include(FetchContent)

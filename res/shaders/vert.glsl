@@ -1,7 +1,7 @@
 #version 300 es
 #define TEXTURE_SLOTS {texture_slot_count}u
 
-in vec2 mesh_uv_pos;
+in vec2 mesh_pos;
 in vec2 instance_pos;
 in vec2 instance_size;
 in vec2 instance_uv_pos;
@@ -13,7 +13,7 @@ uniform mat4 projection;
 uniform bool use_tiles;
 uniform uint columns;
 struct tile_set { uint first, last, columns, rows, tex, padding[3]; };
-uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
+layout(std140) uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
 
 out vec2 mpos;
 out vec2 pos;
@@ -22,12 +22,6 @@ flat out uint tex;
 
 void main()
 {
-  vec2 mesh_pos = vec2[4](
-    vec2(0, 0), 
-    vec2(0, 1), 
-    vec2(1, 0), 
-    vec2(1, 1)
-  )[gl_VertexID];
   mpos = mesh_pos;
   if (use_tiles)
   {

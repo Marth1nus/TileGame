@@ -1,4 +1,4 @@
-#include <print>
+#include <cstdio>
 
 #include <stdexcept>
 #include <type_traits>
@@ -107,11 +107,11 @@ static auto apply_glsl_format_variables(std::span<char> glsl)
   while (true)
   {
     char buf[] = "{texture_slot_count}";
-    auto offset = std::string_view{glsl}.find(buf);
+    auto offset = std::string_view{glsl.data(), glsl.size()}.find(buf);
     if (offset == std::string_view::npos)
       break;
     std::snprintf(buf, std::size(buf), "%*d", (int)std::size(buf) - 1, texture_slot_count);
-    std::ranges::copy(std::string_view{buf}, glsl.data() + offset);
+    std::copy(buf, buf + std::size(buf) - 1, glsl.data() + offset);
     glsl = glsl.subspan(offset + std::size(buf) - 1);
   }
 }
@@ -120,6 +120,24 @@ static auto load_glsl_from_file(char const *filepath)
 {
   auto res = utils::file_read_all(filepath);
   apply_glsl_format_variables(res);
+#ifdef __EMSCRIPTEN__
+  auto find = "vec4 tex_color = texture(textures[tex], uv);"sv;
+  if (auto offset = res.find(find); offset not_eq std::string::npos)
+  {
+    auto glsl = res.substr(0, offset);
+    glsl += "vec4 tex_color; switch (tex) { ";
+    for (auto i = 0; i < texture_slot_count; i++)
+    {
+      char buf[96];
+      std::snprintf(buf, std::size(buf), "\tcase %4du: tex_color = texture(textures[%4du], uv); break; ", i, i);
+      glsl += buf;
+    }
+    glsl += "}";
+    glsl += std::string_view{res}.substr(offset + find.size());
+    res = std::move(glsl);
+  }
+#else
+#endif
   return res;
 }
 
@@ -128,15 +146,13 @@ static struct glfw
   glfw() { ASSERT(glfwInit()); }
   ~glfw() { glfwTerminate(); }
 } const glfw{};
-
-static auto window = shared<GLFWwindow>{};
-
-static inline auto window_init(int width = 720, int height = -1, char const *title = "TileGame")
+static auto window = []()
 {
-  height = height < 0 ? width : height;
+  auto width = 720, height = width;
+  auto title = "TileGame";
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-  window = {glfwCreateWindow(width, height, title, 0, 0), glfwDestroyWindow};
+  auto window = shared{glfwCreateWindow(width, height, title, 0, 0), glfwDestroyWindow};
   glfwMakeContextCurrent(ASSERT(window));
 #ifdef __EMSCRIPTEN__
 #else
@@ -146,7 +162,8 @@ static inline auto window_init(int width = 720, int height = -1, char const *tit
   glCheckError();
 
   glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slot_count);
-}
+  return window;
+}();
 
 struct instance
 {
@@ -159,8 +176,9 @@ struct tile_set
       tex, padding[3];
 };
 static auto vao = GLuint{};
-static auto vbos = std::array<GLuint, 3>{};
-static auto const &[instances_vbo, tiles_vbo, tile_sets_ubo] = vbos;
+static auto vbos = std::array<GLuint, 4>{};
+static auto const &[vertices_vbo, instances_vbo, tiles_vbo, tile_sets_ubo] = vbos;
+static auto constexpr vertices = std::array{vec2{0, 0}, vec2{0, 1}, vec2{1, 0}, vec2{1, 1}};
 static auto instances = std::vector<instance>{};
 static auto tiles = std::vector<uint32_t>{};
 static auto tile_sets = std::vector<tile_set>{};
@@ -173,6 +191,15 @@ static inline auto vao_init()
   glBindVertexArray(vao);
   auto bytes = std::span<std::byte const>{};
   auto i = 0;
+
+  bytes = std::as_bytes(std::span(vertices));
+  glBindBuffer(GL_ARRAY_BUFFER, vertices_vbo);
+  glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_STATIC_DRAW);
+  glCheckError();
+
+  glVertexAttribPointer(i, 2, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(vec2), (void *)0);
+  glEnableVertexAttribArray(i++);
+  glCheckError();
 
   bytes = std::as_bytes(std::span(instances));
   glBindBuffer(GL_ARRAY_BUFFER, instances_vbo);
@@ -248,7 +275,7 @@ static struct
       columns,
       textures;
 } uniform{};
-auto projection = glm::ortho<float>(0, 41, 0, 37);
+auto projection = glm::ortho<float>(0, 32, 0, 32);
 
 [[nodiscard("Return is a new shader handle (Manual deletion required)")]]
 static auto make_shader(GLenum type, std::string_view glsl)
@@ -273,9 +300,9 @@ static auto make_shader(GLenum type, std::string_view glsl)
 }
 static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
 {
-  pid and (glDeleteProgram(pid), 1);
-  vid and (glDeleteShader(vid), 1);
-  fid and (glDeleteShader(fid), 1);
+  (void)(pid and (glDeleteProgram(pid), 1));
+  (void)(vid and (glDeleteShader(vid), 1));
+  (void)(fid and (glDeleteShader(fid), 1));
   pid = glCreateProgram();
   vid = make_shader(GL_VERTEX_SHADER, vert_glsl);
   fid = make_shader(GL_FRAGMENT_SHADER, frag_glsl);
@@ -301,7 +328,9 @@ static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
   uniform.textures /*   */ = glGetUniformLocation(pid, "textures" /*    */);
   glCheckError();
 
-  auto textures = std::views::iota(0, texture_slot_count) | std::ranges::to<std::vector>();
+  auto textures = std::vector<int>((size_t)texture_slot_count);
+  std::generate(textures.begin(), textures.end(), [i = 0]() mutable
+                { return i++; });
 
   glUniformMatrix4fv(uniform.projection, 1, 0, &projection[0][0]);
   glUniform1ui(uniform.use_tiles, true);
@@ -336,38 +365,39 @@ static auto textures_load(utils::sized_range_value_convertible_to<char const *> 
 
 static inline void setup()
 {
-  window_init();
   vao_init();
-  pid_init(load_glsl_from_file("shaders/vert.glsl"),
-           load_glsl_from_file("shaders/frag.glsl"));
+  pid_init(load_glsl_from_file("res/shaders/vert.glsl"),
+           load_glsl_from_file("res/shaders/frag.glsl"));
   glClearColor(0.1, 0.1, 0.1, 0.1);
-  glfwSwapInterval(1);
 
   textures_load(std::array{
-      "images/gfx/cave.png",      // 0
-      "images/gfx/character.png", // 1
-      "images/gfx/font.png",      // 2
-      "images/gfx/Inner.png",     // 3
-      "images/gfx/log.png",       // 4
-      "images/gfx/NPC_test.png",  // 5
-      "images/gfx/objects.png",   // 6
-      "images/gfx/Overworld.png", // 7
+      "res/images/gfx/cave.png",      // 0
+      "res/images/gfx/character.png", // 1
+      "res/images/gfx/font.png",      // 2
+      "res/images/gfx/Inner.png",     // 3
+      "res/images/gfx/log.png",       // 4
+      "res/images/gfx/NPC_test.png",  // 5
+      "res/images/gfx/objects.png",   // 6
+      "res/images/gfx/Overworld.png", // 7
   });
 
   instances = {
-      instance{.pos{06, 06}, .size{5, 5}, .tex = 0},
-      instance{.pos{12, 06}, .size{5, 5}, .tex = 1},
-      instance{.pos{06, 12}, .size{5, 5}, .tex = 2},
-      instance{.pos{12, 12}, .size{5, 5}, .tex = 3},
+      instance{.pos{04, 04}, .size{07, 07}, .uv_size{1, 1}, .tex = 0},
+      instance{.pos{12, 04}, .size{16, 07}, .uv_size{2, 1}, .tex = 1},
+      instance{.pos{04, 12}, .size{07, 16}, .uv_size{1, 2}, .tex = 2},
+      instance{.pos{12, 12}, .size{16, 16}, .uv_size{2, 2}, .tex = 3},
   };
   instances_upload();
 
   tile_sets = {
       tile_set{.first = 0, .last = 40 * 36, .columns = 40, .rows = 36, .tex = 7},
   };
+  tile_sets.resize(texture_slot_count * 2, tile_sets.at(0));
   tile_sets_upload();
 
-  tiles = std::views::iota(0ui32, 40 * 36ui32) | std::ranges::to<std::vector>();
+  tiles.resize((size_t)40 * 36);
+  std::generate(tiles.begin(), tiles.end(), [i = 0]() mutable
+                { return i++; });
   tiles_upload();
 
   glCheckError();
@@ -375,37 +405,40 @@ static inline void setup()
 
 static inline void loop()
 {
-  pid_init(load_glsl_from_file("shaders/vert.glsl"),
-           load_glsl_from_file("shaders/frag.glsl"));
-
+  pid_init(load_glsl_from_file("res/shaders/vert.glsl"),
+           load_glsl_from_file("res/shaders/frag.glsl"));
   glClear(GL_COLOR_BUFFER_BIT);
 
   glUseProgram(pid);
   glBindVertexArray(vao);
 
-  for (auto [i, tex] : textures | std::views::enumerate | std::views::reverse)
-    glActiveTexture(GL_TEXTURE0 + i), glBindTexture(GL_TEXTURE_2D, tex);
+  for (auto i = (int)textures.size() - 1; i >= 0; i--)
+  {
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, textures.at(i));
+  }
 
   glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
 
   glUniform1ui(uniform.use_tiles, true);
   glUniform1ui(uniform.columns, 40);
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)tiles.size());
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tiles.size());
   glCheckError();
 
   glUniform1ui(uniform.use_tiles, false);
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)instances.size());
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)instances.size());
   glCheckError();
 
   glfwSwapBuffers(window);
+  glfwSwapInterval(1);
   glfwPollEvents();
 }
 
 int main()
 {
 #ifdef __EMSCRIPTEN__
-  emscripten_set_main_loop(loop, 0, true);
   setup();
+  emscripten_set_main_loop(loop, 0, true);
 #else
   setup();
   while (not glfwWindowShouldClose(window))
