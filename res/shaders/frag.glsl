@@ -17,7 +17,7 @@ void main()
 {
   vec4 tex_color = texture(textures[tex], uv); // Required for WebGL (Do not modify)
   color = tex_color;
-  const float o = 0.001f; 
+  const float o = 0.00f; 
   if (mpos.x < o || 1.0f - o < mpos.x 
   ||  mpos.y < o || 1.0f - o < mpos.y) color = vec4(1);
 }
