@@ -1,14 +1,38 @@
----@diagnostic disable: lowercase-global
+package.loaded.map = nil
+game.map = require("map")
+game.state = game.state or {
+  view_width = 16,
+  aspect     = 1,
+  camera_pos = {0,0}
+}
 
-game.viewport(0, 0, 720, 720)
-game.tick_rate(1.0 / 1)
-i = i or 1
-print("hello", i)
-i = i + 1
-
-function game.event.on_key(key, _, press)
-  print(string.char(key), press, game.input.key.W == key)
+function game.event.on_window_size(w, h)
+  game.viewport(0, 0, w, h)
+  game.state.aspect = w / h
+  game.state.update_view()
 end
 
-function game.event.on_event(name, ...)
+function game.state.update_view()
+  local a, s = game.state.aspect, game.state.view_width
+  local w, h = s * a, s / a
+  local x, y = table.unpack(game.state.camera_pos or { 0, 0 })
+  game.camera(x - w, x + w, y - h, y + h);
+end
+
+function game.setup()
+  print("setup")
+  game.event.on_window_size(720, 720)
+  game.loaded_map = game.map.load("main")
+end
+
+function game.update(dt)
+  game.loaded_map = game.map.load("main")
+end
+
+function game.draw()
+  game.map.draw()
+end
+
+function game.shutdown()
+  print("shutdown")
 end

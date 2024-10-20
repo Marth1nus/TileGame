@@ -183,18 +183,18 @@ struct instance
   vec2 pos{0, 0}, size{1, 1}, uv_pos{0, 0}, uv_size{1, 1};
   uint tex{0};
 };
-struct tile_set
+struct tileset
 {
   uint first, last, columns, rows,
       tex, padding[3];
 };
 static auto vao = GLuint{};
 static auto vbos = std::array<GLuint, 4>{};
-static auto const &[vertices_vbo, instances_vbo, tiles_vbo, tile_sets_ubo] = vbos;
+static auto const &[vertices_vbo, instances_vbo, tiles_vbo, tilesets_ubo] = vbos;
 static auto constexpr vertices = std::array{vec2{0, 0}, vec2{0, 1}, vec2{1, 0}, vec2{1, 1}};
 static auto instances = std::vector<instance>{};
 static auto tiles = std::vector<uint32_t>{};
-static auto tile_sets = std::vector<tile_set>{};
+static auto tilesets = std::vector<tileset>{};
 
 static inline auto vao_init()
 {
@@ -244,8 +244,8 @@ static inline auto vao_init()
   glEnableVertexAttribArray(i++);
   glCheckError();
 
-  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
-  glBindBufferBase(GL_UNIFORM_BUFFER, 0, tile_sets_ubo);
+  glBindBuffer(GL_UNIFORM_BUFFER, tilesets_ubo);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, tilesets_ubo);
   glCheckError();
 }
 static inline auto instances_upload()
@@ -268,13 +268,13 @@ static inline auto tiles_upload()
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizei)bytes.size(), bytes.data());
   glCheckError();
 }
-static inline auto tile_sets_upload()
+static inline auto tilesets_upload()
 {
   auto static constinit capacity = size_t(0);
-  glBindBuffer(GL_UNIFORM_BUFFER, tile_sets_ubo);
-  if (capacity not_eq tile_sets.capacity())
-    glBufferData(GL_UNIFORM_BUFFER, (capacity = tile_sets.capacity()) * sizeof(tile_sets.at(0)), nullptr, GL_DYNAMIC_READ);
-  if (auto bytes = std::as_bytes(std::span(tile_sets)); not bytes.empty())
+  glBindBuffer(GL_UNIFORM_BUFFER, tilesets_ubo);
+  if (capacity not_eq tilesets.capacity())
+    glBufferData(GL_UNIFORM_BUFFER, (capacity = tilesets.capacity()) * sizeof(tilesets.at(0)), nullptr, GL_DYNAMIC_READ);
+  if (auto bytes = std::as_bytes(std::span(tilesets)); not bytes.empty())
     glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes.size(), bytes.data());
   glCheckError();
 }
@@ -283,9 +283,9 @@ static GLuint vid, fid, pid;
 static struct
 {
   GLint projection,
-      use_tiles,
-      TILE_SETS,
-      columns,
+      TILESETS,
+      tiles_use,
+      tiles_chunk,
       textures;
 } uniform{};
 auto projection = glm::ortho<float>(0, 32, 0, 32);
@@ -334,11 +334,11 @@ static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
   glCheckError();
 
   glUseProgram(pid);
-  uniform.projection /* */ = glGetUniformLocation(pid, "projection" /*  */);
-  uniform.use_tiles /*  */ = glGetUniformLocation(pid, "use_tiles" /*   */);
-  uniform.TILE_SETS /*  */ = glGetUniformBlockIndex(pid, "TILE_SETS" /* */);
-  uniform.columns /*    */ = glGetUniformLocation(pid, "columns" /*     */);
-  uniform.textures /*   */ = glGetUniformLocation(pid, "textures" /*    */);
+  uniform.projection /*  */ = glGetUniformLocation(pid, "projection" /*  */);
+  uniform.TILESETS /*    */ = glGetUniformBlockIndex(pid, "TILESETS" /*  */);
+  uniform.tiles_use /*   */ = glGetUniformLocation(pid, "tiles_use" /*   */);
+  uniform.tiles_chunk /* */ = glGetUniformLocation(pid, "tiles_chunk" /* */);
+  uniform.textures /*    */ = glGetUniformLocation(pid, "textures" /*    */);
   glCheckError();
 
   auto textures = std::vector<int>((size_t)texture_slot_count);
@@ -346,29 +346,43 @@ static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
                 { return i++; });
 
   glUniformMatrix4fv(uniform.projection, 1, 0, &projection[0][0]);
-  glUniform1ui(uniform.use_tiles, true);
-  glUniformBlockBinding(pid, uniform.TILE_SETS, 0);
-  glUniform1ui(uniform.columns, 1);
+  glUniformBlockBinding(pid, uniform.TILESETS, 0);
+  glUniform1i(uniform.tiles_use, false);
+  glUniform4i(uniform.tiles_chunk, 0, 0, 0, 0);
   glUniform1iv(uniform.textures, (GLsizei)texture_slot_count, textures.data());
   glCheckError();
 }
 
-static inline auto tiles_draw(uint columns)
+static inline auto tiles_draw(uint columns, int x = 0, int y = 0)
 {
-  glUniform1ui(uniform.use_tiles, true);
-  glUniform1ui(uniform.columns, columns);
+  glUniform1i(uniform.tiles_use, true);
+  glUniform4i(uniform.tiles_chunk, x, y, columns, 0);
   glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tiles.size());
   glCheckError();
 }
 static inline auto instances_draw()
 {
-  glUniform1ui(uniform.use_tiles, false);
+  glUniform1ui(uniform.tiles_use, false);
   glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)instances.size());
   glCheckError();
 }
 
 auto textures = std::vector<GLuint>{};
 auto textures_paths = std::vector<std::string>{};
+static inline auto texture_load(GLuint tid, char const *path)
+{
+  glBindTexture(GL_TEXTURE_2D, tid);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+  auto width = 1, height = 1, channels = 4;
+  auto pixels = ASSERT(stbi_load(path, &width, &height, &channels, channels));
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  stbi_image_free(pixels);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glCheckError();
+}
 static inline auto textures_load(std::vector<std::string> files)
 {
   if (not textures.empty())
@@ -378,20 +392,7 @@ static inline auto textures_load(std::vector<std::string> files)
     glGenTextures((GLsizei)textures.size(), textures.data());
   textures_paths = std::move(files);
   for (auto i = 0u; i < textures.size(); i++)
-  {
-    auto path = textures_paths.at(i).c_str();
-    glBindTexture(GL_TEXTURE_2D, textures.at(i));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
-    auto width = 1, height = 1, channels = 4;
-    auto pixels = ASSERT(stbi_load(path, &width, &height, &channels, channels));
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    stbi_image_free(pixels);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glCheckError();
-  }
+    texture_load(textures.at(i), textures_paths.at(i).c_str());
 }
 static inline auto textures_clear()
 {
@@ -410,11 +411,12 @@ struct ticker
   double start_time = glfwGetTime();
   size_t tik = 0, max_ticks_per_frame = 4;
   bool next() { return tik < size_t((glfwGetTime() - start_time) / dt) ? ++tik : false; }
+  auto skip() { start_time = glfwGetTime() - tik * dt; }
 };
 static auto update_ticker = ticker{};
 
 static auto L = shared<lua_State>{};
-namespace lua
+namespace lua::helper
 {
   template <auto event_name>
   static auto constexpr event_window_forward(GLFWwindow *window, auto... args)
@@ -468,182 +470,12 @@ namespace lua
     }
     lua_settop(L, top);
   }
-  static auto tile_sets_clear /*   */ (lua_State *L) -> int // fun()
+}
+namespace lua::game::event
+{
+  static auto window_init /* */ (lua_State *L) -> int // fun()
   {
-    tile_sets.clear();
-    return 0;
-  }
-  static auto tile_sets_add /*     */ (lua_State *L) -> int // fun(tile_set: tile_set)
-  {
-    if (auto argc = lua_gettop(L); argc not_eq 1)
-      return luaL_error(L, "Expected 1 arg. Got %d", argc);
-    auto getfield = [L](auto name, auto fn, auto... args)
-    {
-      lua_getfield(L, -1, name);
-      auto res = fn(L, -1, args...);
-      return lua_pop(L, 1), res;
-    };
-    auto path /*    */ = getfield("image" /*   */, luaL_checklstring /* */, nullptr);
-    auto columns /* */ = getfield("columns" /* */, luaL_checkinteger /* */);
-    auto rows /*    */ = getfield("rows" /*    */, luaL_optinteger /*   */, columns);
-    auto count /*   */ = getfield("count" /*   */, luaL_optinteger /*   */, columns * rows);
-    auto tex /*     */ = std::distance(textures_paths.begin(), std::ranges::find(textures_paths, path));
-    auto first /*   */ = tile_sets.empty() ? 0 : tile_sets.back().last + 1;
-    if (tex == textures_paths.size())
-      return luaL_error(L, "Texture not loaded: %s", path);
-    tile_sets.push_back(tile_set{
-        .first /*   */ = uint(first),
-        .last /*    */ = uint(first + count),
-        .columns /* */ = uint(columns),
-        .rows /*    */ = uint(rows),
-        .tex /*     */ = uint(tex),
-    });
-    return 0;
-  }
-  static auto tile_sets_set /*     */ (lua_State *L) -> int // fun(tile_sets: tile_set[])
-  {
-    if (auto argc = lua_gettop(L); argc == 0)
-      return tile_sets_upload(), 0;
-    else if (argc not_eq 1)
-      return luaL_error(L, "Expected 1 arg. Got %d", argc);
-    tile_sets.clear();
-    tile_sets.reserve(luaL_len(L, -1));
-    for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
-      lua_pushcclosure(L, tile_sets_add, 0), lua_pushvalue(L, -2), lua_call(L, 1, 0);
-    tile_sets_upload();
-    return 0;
-  }
-  static auto tiles_set /*         */ (lua_State *L) -> int // fun(tiles: integer[])
-  {
-    if (lua_gettop(L) < 1)
-      luaL_error(L, "too few arguments");
-    luaL_checktype(L, -1, LUA_TTABLE);
-    tiles.clear();
-    tiles.reserve(luaL_len(L, -1));
-    for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
-      tiles.push_back(luaL_checkinteger(L, -1));
-    tiles_upload();
-    return 0;
-  }
-  static auto instances_clear /*   */ (lua_State *L) -> int // fun()
-  {
-    instances.clear();
-    return 0;
-  }
-  static auto instances_add /*     */ (lua_State *L) -> int // fun(instance: instance)
-  {
-    if (auto argc = lua_gettop(L); argc not_eq 1)
-      return luaL_error(L, "Expected 1 arg. Got %d", argc);
-    luaL_checktype(L, 1, LUA_TTABLE);
-    auto inst = instance{};
-    if (lua_getfield(L, -1, "pos" /*     */) == LUA_TTABLE)
-    {
-      lua_geti(L, -1, 1), (inst.pos /*     */.x = luaL_checknumber(L, -1)), lua_pop(L, 1);
-      lua_geti(L, -1, 2), (inst.pos /*     */.y = luaL_checknumber(L, -1)), lua_pop(L, 1);
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "size" /*    */) == LUA_TTABLE)
-    {
-      lua_geti(L, -1, 1), (inst.size /*    */.x = luaL_checknumber(L, -1)), lua_pop(L, 1);
-      lua_geti(L, -1, 2), (inst.size /*    */.y = luaL_checknumber(L, -1)), lua_pop(L, 1);
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "uv_pos" /*  */) == LUA_TTABLE)
-    {
-      lua_geti(L, -1, 1), (inst.uv_pos /*  */.x = luaL_checknumber(L, -1)), lua_pop(L, 1);
-      lua_geti(L, -1, 2), (inst.uv_pos /*  */.y = luaL_checknumber(L, -1)), lua_pop(L, 1);
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "uv_size" /* */) == LUA_TTABLE)
-    {
-      lua_geti(L, -1, 1), (inst.uv_size /* */.x = luaL_checknumber(L, -1)), lua_pop(L, 1);
-      lua_geti(L, -1, 2), (inst.uv_size /* */.y = luaL_checknumber(L, -1)), lua_pop(L, 1);
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "tex" /*     */) == LUA_TNUMBER)
-    {
-      inst.tex = luaL_checkinteger(L, -1);
-    }
-    lua_pop(L, 1);
-    instances.push_back(inst);
-    return 0;
-  }
-  static auto instances_set /*     */ (lua_State *L) -> int // fun(instances: instance[])
-  {
-    if (auto argc = lua_gettop(L); argc == 0)
-      return instances_upload(), 0;
-    else if (argc not_eq 1)
-      return luaL_error(L, "Expected 1 arg. Got %d", argc);
-    luaL_checktype(L, 1, LUA_TTABLE);
-    instances.clear();
-    instances.reserve(luaL_len(L, -1));
-    for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
-      lua_pushcclosure(L, instances_add, 0), lua_pushvalue(L, -2), lua_call(L, 1, 0);
-    instances_upload();
-    return 0;
-  }
-  static auto tick_rate /*         */ (lua_State *L) -> int // fun(dt: number?): number
-  {
-    if (auto argc = lua_gettop(L); argc == 1)
-      update_ticker = {.dt = luaL_checknumber(L, 1)};
-    else if (argc not_eq 0)
-      return luaL_error(L, "Expected 0 or 1 args. Got %d", argc);
-    lua_pushnumber(L, update_ticker.dt);
-    return 1;
-  }
-  static auto textures_set /*      */ (lua_State *L) -> int // fun(filepaths: string[])
-  {
-    if (auto argc = lua_gettop(L); argc not_eq 1)
-      return luaL_error(L, "Expected 1 arg. Got %d", argc);
-    luaL_checktype(L, 1, LUA_TTABLE);
-    try
-    {
-      auto paths = std::vector<std::string>{};
-      paths.reserve(luaL_len(L, -1));
-      for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
-        if (auto path = luaL_tolstring(L, -1, 0); not path)
-          throw std::runtime_error{lua_pushfstring(L, "paths[%i] was not a string", lua_tointegerx(L, -2, 0))};
-        else if (auto file = std::fopen(path, "r"); not file)
-          throw std::runtime_error{lua_pushfstring(L, "File not found: %s", path)};
-        else
-          std::fclose(file), paths.push_back(path);
-      textures_load(std::move(paths));
-      return 0;
-    }
-    catch (std::exception const &e)
-    {
-      lua_pushstring(L, e.what());
-    }
-    return lua_error(L);
-  }
-  static auto camera /*            */ (lua_State *L) -> int // fun(left: number, right: number, bottom: number, top: number)
-  {
-    if (auto argc = lua_gettop(L); argc not_eq 4)
-      return luaL_error(L, "Expected 4 args. Got %d", argc);
-    projection = glm::ortho<float>(luaL_checknumber(L, 1),
-                                   luaL_checknumber(L, 2),
-                                   luaL_checknumber(L, 3),
-                                   luaL_checknumber(L, 4));
-    return 0;
-  }
-  static auto viewport /*          */ (lua_State *L) -> int // fun(x: integer, y: integer, width: integer, height: integer)
-  {
-    if (auto argc = lua_gettop(L); argc not_eq 4)
-      return luaL_error(L, "Expected 4 args. Got %d", argc);
-    glViewport(luaL_checkinteger(L, 1),
-               luaL_checkinteger(L, 2),
-               luaL_checkinteger(L, 3),
-               luaL_checkinteger(L, 4));
-    return 0;
-  }
-  static auto time /*              */ (lua_State *L) -> int // fun():number
-  {
-    lua_pushnumber(L, glfwGetTime());
-    return 1;
-  }
-  static auto event_window_init /* */ (lua_State *L) -> int // fun()
-  {
-    using utils::CTS;
+    using utils::CTS, helper::event_window_forward;
     if (L not_eq ::L)
       luaL_error(L, "Must be the global lua state. global:0x%p, provided:0x%p", static_cast<lua_State *>(::L), L);
     glfwSetWindowPosCallback /*          */ (window, event_window_forward<CTS("on_window_pos" /*           */)>);
@@ -665,70 +497,200 @@ namespace lua
     glfwSetDropCallback /*               */ (window, event_window_forward<CTS("on_drop" /*                 */)>);
     return 0;
   }
-  static auto open_lib /*          */ (lua_State *L) -> int // fun()
+  static auto open_lib /*    */ (lua_State *L) -> int // fun()
   {
-    { // game
-      luaL_Reg static constexpr game[]{
-          {"tile_sets_clear" /*  */, tile_sets_clear /*  */},
-          {"tile_sets_add" /*    */, tile_sets_add /*    */},
-          {"tile_sets_set" /*    */, tile_sets_set /*    */},
-          {"tiles_set" /*        */, tiles_set /*        */},
-          {"instances_clear" /*  */, instances_clear /*  */},
-          {"instances_add" /*    */, instances_add /*    */},
-          {"instances_set" /*    */, instances_set /*    */},
-          {"tick_rate" /*        */, tick_rate /*        */},
-          {"reopen_lib" /*       */, open_lib /*         */},
-          {"textures_set" /*     */, textures_set /*     */},
-          {"camera" /*           */, camera /*           */},
-          {"viewport" /*         */, viewport /*         */},
-          {"time" /*             */, time /*             */},
-          {0, 0}};
-      luaL_newlib(L, game);
-      lua_pushvalue(L, -1);
-      lua_setglobal(L, "game");
-    }
-    { // game.event
-      luaL_Reg static constexpr event[]{
-          {"window_init", event_window_init}, // function()
-          {0, 0}};
-      luaL_newlib(L, event), lua_setfield(L, -2, "event");
-    }
-    { // game.input
-      lua_createtable(L, 0, 3);
-      { // game.input.keys
-        auto static constexpr keys = std::array{std::tuple{(uint16_t)GLFW_KEY_UNKNOWN, "UNKNOWN"}, std::tuple{(uint16_t)GLFW_KEY_SPACE, "SPACE"}, std::tuple{(uint16_t)GLFW_KEY_APOSTROPHE, "APOSTROPHE"}, std::tuple{(uint16_t)GLFW_KEY_COMMA, "COMMA"}, std::tuple{(uint16_t)GLFW_KEY_MINUS, "MINUS"}, std::tuple{(uint16_t)GLFW_KEY_PERIOD, "PERIOD"}, std::tuple{(uint16_t)GLFW_KEY_SLASH, "SLASH"}, std::tuple{(uint16_t)GLFW_KEY_0, "0"}, std::tuple{(uint16_t)GLFW_KEY_1, "1"}, std::tuple{(uint16_t)GLFW_KEY_2, "2"}, std::tuple{(uint16_t)GLFW_KEY_3, "3"}, std::tuple{(uint16_t)GLFW_KEY_4, "4"}, std::tuple{(uint16_t)GLFW_KEY_5, "5"}, std::tuple{(uint16_t)GLFW_KEY_6, "6"}, std::tuple{(uint16_t)GLFW_KEY_7, "7"}, std::tuple{(uint16_t)GLFW_KEY_8, "8"}, std::tuple{(uint16_t)GLFW_KEY_9, "9"}, std::tuple{(uint16_t)GLFW_KEY_SEMICOLON, "SEMICOLON"}, std::tuple{(uint16_t)GLFW_KEY_EQUAL, "EQUAL"}, std::tuple{(uint16_t)GLFW_KEY_A, "A"}, std::tuple{(uint16_t)GLFW_KEY_B, "B"}, std::tuple{(uint16_t)GLFW_KEY_C, "C"}, std::tuple{(uint16_t)GLFW_KEY_D, "D"}, std::tuple{(uint16_t)GLFW_KEY_E, "E"}, std::tuple{(uint16_t)GLFW_KEY_F, "F"}, std::tuple{(uint16_t)GLFW_KEY_G, "G"}, std::tuple{(uint16_t)GLFW_KEY_H, "H"}, std::tuple{(uint16_t)GLFW_KEY_I, "I"}, std::tuple{(uint16_t)GLFW_KEY_J, "J"}, std::tuple{(uint16_t)GLFW_KEY_K, "K"}, std::tuple{(uint16_t)GLFW_KEY_L, "L"}, std::tuple{(uint16_t)GLFW_KEY_M, "M"}, std::tuple{(uint16_t)GLFW_KEY_N, "N"}, std::tuple{(uint16_t)GLFW_KEY_O, "O"}, std::tuple{(uint16_t)GLFW_KEY_P, "P"}, std::tuple{(uint16_t)GLFW_KEY_Q, "Q"}, std::tuple{(uint16_t)GLFW_KEY_R, "R"}, std::tuple{(uint16_t)GLFW_KEY_S, "S"}, std::tuple{(uint16_t)GLFW_KEY_T, "T"}, std::tuple{(uint16_t)GLFW_KEY_U, "U"}, std::tuple{(uint16_t)GLFW_KEY_V, "V"}, std::tuple{(uint16_t)GLFW_KEY_W, "W"}, std::tuple{(uint16_t)GLFW_KEY_X, "X"}, std::tuple{(uint16_t)GLFW_KEY_Y, "Y"}, std::tuple{(uint16_t)GLFW_KEY_Z, "Z"}, std::tuple{(uint16_t)GLFW_KEY_LEFT_BRACKET, "LEFT_BRACKET"}, std::tuple{(uint16_t)GLFW_KEY_BACKSLASH, "BACKSLASH"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT_BRACKET, "RIGHT_BRACKET"}, std::tuple{(uint16_t)GLFW_KEY_GRAVE_ACCENT, "GRAVE_ACCENT"}, std::tuple{(uint16_t)GLFW_KEY_WORLD_1, "WORLD_1"}, std::tuple{(uint16_t)GLFW_KEY_WORLD_2, "WORLD_2"}, std::tuple{(uint16_t)GLFW_KEY_ESCAPE, "ESCAPE"}, std::tuple{(uint16_t)GLFW_KEY_ENTER, "ENTER"}, std::tuple{(uint16_t)GLFW_KEY_TAB, "TAB"}, std::tuple{(uint16_t)GLFW_KEY_BACKSPACE, "BACKSPACE"}, std::tuple{(uint16_t)GLFW_KEY_INSERT, "INSERT"}, std::tuple{(uint16_t)GLFW_KEY_DELETE, "DELETE"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT, "RIGHT"}, std::tuple{(uint16_t)GLFW_KEY_LEFT, "LEFT"}, std::tuple{(uint16_t)GLFW_KEY_DOWN, "DOWN"}, std::tuple{(uint16_t)GLFW_KEY_UP, "UP"}, std::tuple{(uint16_t)GLFW_KEY_PAGE_UP, "PAGE_UP"}, std::tuple{(uint16_t)GLFW_KEY_PAGE_DOWN, "PAGE_DOWN"}, std::tuple{(uint16_t)GLFW_KEY_HOME, "HOME"}, std::tuple{(uint16_t)GLFW_KEY_END, "END"}, std::tuple{(uint16_t)GLFW_KEY_CAPS_LOCK, "CAPS_LOCK"}, std::tuple{(uint16_t)GLFW_KEY_SCROLL_LOCK, "SCROLL_LOCK"}, std::tuple{(uint16_t)GLFW_KEY_NUM_LOCK, "NUM_LOCK"}, std::tuple{(uint16_t)GLFW_KEY_PRINT_SCREEN, "PRINT_SCREEN"}, std::tuple{(uint16_t)GLFW_KEY_PAUSE, "PAUSE"}, std::tuple{(uint16_t)GLFW_KEY_F1, "F1"}, std::tuple{(uint16_t)GLFW_KEY_F2, "F2"}, std::tuple{(uint16_t)GLFW_KEY_F3, "F3"}, std::tuple{(uint16_t)GLFW_KEY_F4, "F4"}, std::tuple{(uint16_t)GLFW_KEY_F5, "F5"}, std::tuple{(uint16_t)GLFW_KEY_F6, "F6"}, std::tuple{(uint16_t)GLFW_KEY_F7, "F7"}, std::tuple{(uint16_t)GLFW_KEY_F8, "F8"}, std::tuple{(uint16_t)GLFW_KEY_F9, "F9"}, std::tuple{(uint16_t)GLFW_KEY_F10, "F10"}, std::tuple{(uint16_t)GLFW_KEY_F11, "F11"}, std::tuple{(uint16_t)GLFW_KEY_F12, "F12"}, std::tuple{(uint16_t)GLFW_KEY_F13, "F13"}, std::tuple{(uint16_t)GLFW_KEY_F14, "F14"}, std::tuple{(uint16_t)GLFW_KEY_F15, "F15"}, std::tuple{(uint16_t)GLFW_KEY_F16, "F16"}, std::tuple{(uint16_t)GLFW_KEY_F17, "F17"}, std::tuple{(uint16_t)GLFW_KEY_F18, "F18"}, std::tuple{(uint16_t)GLFW_KEY_F19, "F19"}, std::tuple{(uint16_t)GLFW_KEY_F20, "F20"}, std::tuple{(uint16_t)GLFW_KEY_F21, "F21"}, std::tuple{(uint16_t)GLFW_KEY_F22, "F22"}, std::tuple{(uint16_t)GLFW_KEY_F23, "F23"}, std::tuple{(uint16_t)GLFW_KEY_F24, "F24"}, std::tuple{(uint16_t)GLFW_KEY_F25, "F25"}, std::tuple{(uint16_t)GLFW_KEY_KP_0, "KP_0"}, std::tuple{(uint16_t)GLFW_KEY_KP_1, "KP_1"}, std::tuple{(uint16_t)GLFW_KEY_KP_2, "KP_2"}, std::tuple{(uint16_t)GLFW_KEY_KP_3, "KP_3"}, std::tuple{(uint16_t)GLFW_KEY_KP_4, "KP_4"}, std::tuple{(uint16_t)GLFW_KEY_KP_5, "KP_5"}, std::tuple{(uint16_t)GLFW_KEY_KP_6, "KP_6"}, std::tuple{(uint16_t)GLFW_KEY_KP_7, "KP_7"}, std::tuple{(uint16_t)GLFW_KEY_KP_8, "KP_8"}, std::tuple{(uint16_t)GLFW_KEY_KP_9, "KP_9"}, std::tuple{(uint16_t)GLFW_KEY_KP_DECIMAL, "KP_DECIMAL"}, std::tuple{(uint16_t)GLFW_KEY_KP_DIVIDE, "KP_DIVIDE"}, std::tuple{(uint16_t)GLFW_KEY_KP_MULTIPLY, "KP_MULTIPLY"}, std::tuple{(uint16_t)GLFW_KEY_KP_SUBTRACT, "KP_SUBTRACT"}, std::tuple{(uint16_t)GLFW_KEY_KP_ADD, "KP_ADD"}, std::tuple{(uint16_t)GLFW_KEY_KP_ENTER, "KP_ENTER"}, std::tuple{(uint16_t)GLFW_KEY_KP_EQUAL, "KP_EQUAL"}, std::tuple{(uint16_t)GLFW_KEY_LEFT_SHIFT, "LEFT_SHIFT"}, std::tuple{(uint16_t)GLFW_KEY_LEFT_CONTROL, "LEFT_CONTROL"}, std::tuple{(uint16_t)GLFW_KEY_LEFT_ALT, "LEFT_ALT"}, std::tuple{(uint16_t)GLFW_KEY_LEFT_SUPER, "LEFT_SUPER"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT_SHIFT, "RIGHT_SHIFT"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT_CONTROL, "RIGHT_CONTROL"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT_ALT, "RIGHT_ALT"}, std::tuple{(uint16_t)GLFW_KEY_RIGHT_SUPER, "RIGHT_SUPER"}, std::tuple{(uint16_t)GLFW_KEY_MENU, "MENU"}, std::tuple{(uint16_t)GLFW_KEY_LAST, "LAST"}};
-        lua_createtable(L, 0, (int)keys.size());
-        for (auto [key, name] : keys)
-          lua_pushinteger(L, key), lua_setfield(L, -2, name);
-        lua_setfield(L, -2, "key");
-      }
-      { // game.input.mouse_buttons
-        auto static constexpr mouse_buttons = std::array{std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_1, "1"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_2, "2"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_3, "3"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_4, "4"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_5, "5"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_6, "6"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_7, "7"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_8, "8"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_LAST, "LAST"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_LEFT, "LEFT"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_RIGHT, "RIGHT"}, std::tuple{(uint8_t)GLFW_MOUSE_BUTTON_MIDDLE, "MIDDLE"}};
-        lua_createtable(L, 0, (int)mouse_buttons.size());
-        for (auto [mouse_button, name] : mouse_buttons)
-          lua_pushinteger(L, mouse_button), lua_setfield(L, -2, name);
-        lua_setfield(L, -2, "mouse_button");
-      }
-      { // game.input.mb = game.input.mouse_buttons
-        lua_getfield(L, -1, "mouse_button");
-        lua_setfield(L, -2, "mb");
-      }
-      lua_setfield(L, -2, "input");
-    }
-    lua_pop(L, 1); // pop game table
+    luaL_Reg static constexpr event[]{
+        {"window_init", event::window_init},
+        {0, 0}};
+    if (lua_getglobal(L, "game") not_eq LUA_TTABLE)
+      return 0;
+    luaL_newlib(L, event);
+    lua_setfield(L, -2, "event");
+    lua_pop(L, 1);
     return 0;
   }
+}
+namespace lua::game::input
+{
+  auto static inline constexpr keys = std::array{std::pair{(int16_t)GLFW_KEY_UNKNOWN, "UNKNOWN"}, std::pair{(int16_t)GLFW_KEY_SPACE, "SPACE"}, std::pair{(int16_t)GLFW_KEY_APOSTROPHE, "APOSTROPHE"}, std::pair{(int16_t)GLFW_KEY_COMMA, "COMMA"}, std::pair{(int16_t)GLFW_KEY_MINUS, "MINUS"}, std::pair{(int16_t)GLFW_KEY_PERIOD, "PERIOD"}, std::pair{(int16_t)GLFW_KEY_SLASH, "SLASH"}, std::pair{(int16_t)GLFW_KEY_0, "0"}, std::pair{(int16_t)GLFW_KEY_1, "1"}, std::pair{(int16_t)GLFW_KEY_2, "2"}, std::pair{(int16_t)GLFW_KEY_3, "3"}, std::pair{(int16_t)GLFW_KEY_4, "4"}, std::pair{(int16_t)GLFW_KEY_5, "5"}, std::pair{(int16_t)GLFW_KEY_6, "6"}, std::pair{(int16_t)GLFW_KEY_7, "7"}, std::pair{(int16_t)GLFW_KEY_8, "8"}, std::pair{(int16_t)GLFW_KEY_9, "9"}, std::pair{(int16_t)GLFW_KEY_SEMICOLON, "SEMICOLON"}, std::pair{(int16_t)GLFW_KEY_EQUAL, "EQUAL"}, std::pair{(int16_t)GLFW_KEY_A, "A"}, std::pair{(int16_t)GLFW_KEY_B, "B"}, std::pair{(int16_t)GLFW_KEY_C, "C"}, std::pair{(int16_t)GLFW_KEY_D, "D"}, std::pair{(int16_t)GLFW_KEY_E, "E"}, std::pair{(int16_t)GLFW_KEY_F, "F"}, std::pair{(int16_t)GLFW_KEY_G, "G"}, std::pair{(int16_t)GLFW_KEY_H, "H"}, std::pair{(int16_t)GLFW_KEY_I, "I"}, std::pair{(int16_t)GLFW_KEY_J, "J"}, std::pair{(int16_t)GLFW_KEY_K, "K"}, std::pair{(int16_t)GLFW_KEY_L, "L"}, std::pair{(int16_t)GLFW_KEY_M, "M"}, std::pair{(int16_t)GLFW_KEY_N, "N"}, std::pair{(int16_t)GLFW_KEY_O, "O"}, std::pair{(int16_t)GLFW_KEY_P, "P"}, std::pair{(int16_t)GLFW_KEY_Q, "Q"}, std::pair{(int16_t)GLFW_KEY_R, "R"}, std::pair{(int16_t)GLFW_KEY_S, "S"}, std::pair{(int16_t)GLFW_KEY_T, "T"}, std::pair{(int16_t)GLFW_KEY_U, "U"}, std::pair{(int16_t)GLFW_KEY_V, "V"}, std::pair{(int16_t)GLFW_KEY_W, "W"}, std::pair{(int16_t)GLFW_KEY_X, "X"}, std::pair{(int16_t)GLFW_KEY_Y, "Y"}, std::pair{(int16_t)GLFW_KEY_Z, "Z"}, std::pair{(int16_t)GLFW_KEY_LEFT_BRACKET, "LEFT_BRACKET"}, std::pair{(int16_t)GLFW_KEY_BACKSLASH, "BACKSLASH"}, std::pair{(int16_t)GLFW_KEY_RIGHT_BRACKET, "RIGHT_BRACKET"}, std::pair{(int16_t)GLFW_KEY_GRAVE_ACCENT, "GRAVE_ACCENT"}, std::pair{(int16_t)GLFW_KEY_WORLD_1, "WORLD_1"}, std::pair{(int16_t)GLFW_KEY_WORLD_2, "WORLD_2"}, std::pair{(int16_t)GLFW_KEY_ESCAPE, "ESCAPE"}, std::pair{(int16_t)GLFW_KEY_ENTER, "ENTER"}, std::pair{(int16_t)GLFW_KEY_TAB, "TAB"}, std::pair{(int16_t)GLFW_KEY_BACKSPACE, "BACKSPACE"}, std::pair{(int16_t)GLFW_KEY_INSERT, "INSERT"}, std::pair{(int16_t)GLFW_KEY_DELETE, "DELETE"}, std::pair{(int16_t)GLFW_KEY_RIGHT, "RIGHT"}, std::pair{(int16_t)GLFW_KEY_LEFT, "LEFT"}, std::pair{(int16_t)GLFW_KEY_DOWN, "DOWN"}, std::pair{(int16_t)GLFW_KEY_UP, "UP"}, std::pair{(int16_t)GLFW_KEY_PAGE_UP, "PAGE_UP"}, std::pair{(int16_t)GLFW_KEY_PAGE_DOWN, "PAGE_DOWN"}, std::pair{(int16_t)GLFW_KEY_HOME, "HOME"}, std::pair{(int16_t)GLFW_KEY_END, "END"}, std::pair{(int16_t)GLFW_KEY_CAPS_LOCK, "CAPS_LOCK"}, std::pair{(int16_t)GLFW_KEY_SCROLL_LOCK, "SCROLL_LOCK"}, std::pair{(int16_t)GLFW_KEY_NUM_LOCK, "NUM_LOCK"}, std::pair{(int16_t)GLFW_KEY_PRINT_SCREEN, "PRINT_SCREEN"}, std::pair{(int16_t)GLFW_KEY_PAUSE, "PAUSE"}, std::pair{(int16_t)GLFW_KEY_F1, "F1"}, std::pair{(int16_t)GLFW_KEY_F2, "F2"}, std::pair{(int16_t)GLFW_KEY_F3, "F3"}, std::pair{(int16_t)GLFW_KEY_F4, "F4"}, std::pair{(int16_t)GLFW_KEY_F5, "F5"}, std::pair{(int16_t)GLFW_KEY_F6, "F6"}, std::pair{(int16_t)GLFW_KEY_F7, "F7"}, std::pair{(int16_t)GLFW_KEY_F8, "F8"}, std::pair{(int16_t)GLFW_KEY_F9, "F9"}, std::pair{(int16_t)GLFW_KEY_F10, "F10"}, std::pair{(int16_t)GLFW_KEY_F11, "F11"}, std::pair{(int16_t)GLFW_KEY_F12, "F12"}, std::pair{(int16_t)GLFW_KEY_F13, "F13"}, std::pair{(int16_t)GLFW_KEY_F14, "F14"}, std::pair{(int16_t)GLFW_KEY_F15, "F15"}, std::pair{(int16_t)GLFW_KEY_F16, "F16"}, std::pair{(int16_t)GLFW_KEY_F17, "F17"}, std::pair{(int16_t)GLFW_KEY_F18, "F18"}, std::pair{(int16_t)GLFW_KEY_F19, "F19"}, std::pair{(int16_t)GLFW_KEY_F20, "F20"}, std::pair{(int16_t)GLFW_KEY_F21, "F21"}, std::pair{(int16_t)GLFW_KEY_F22, "F22"}, std::pair{(int16_t)GLFW_KEY_F23, "F23"}, std::pair{(int16_t)GLFW_KEY_F24, "F24"}, std::pair{(int16_t)GLFW_KEY_F25, "F25"}, std::pair{(int16_t)GLFW_KEY_KP_0, "KP_0"}, std::pair{(int16_t)GLFW_KEY_KP_1, "KP_1"}, std::pair{(int16_t)GLFW_KEY_KP_2, "KP_2"}, std::pair{(int16_t)GLFW_KEY_KP_3, "KP_3"}, std::pair{(int16_t)GLFW_KEY_KP_4, "KP_4"}, std::pair{(int16_t)GLFW_KEY_KP_5, "KP_5"}, std::pair{(int16_t)GLFW_KEY_KP_6, "KP_6"}, std::pair{(int16_t)GLFW_KEY_KP_7, "KP_7"}, std::pair{(int16_t)GLFW_KEY_KP_8, "KP_8"}, std::pair{(int16_t)GLFW_KEY_KP_9, "KP_9"}, std::pair{(int16_t)GLFW_KEY_KP_DECIMAL, "KP_DECIMAL"}, std::pair{(int16_t)GLFW_KEY_KP_DIVIDE, "KP_DIVIDE"}, std::pair{(int16_t)GLFW_KEY_KP_MULTIPLY, "KP_MULTIPLY"}, std::pair{(int16_t)GLFW_KEY_KP_SUBTRACT, "KP_SUBTRACT"}, std::pair{(int16_t)GLFW_KEY_KP_ADD, "KP_ADD"}, std::pair{(int16_t)GLFW_KEY_KP_ENTER, "KP_ENTER"}, std::pair{(int16_t)GLFW_KEY_KP_EQUAL, "KP_EQUAL"}, std::pair{(int16_t)GLFW_KEY_LEFT_SHIFT, "LEFT_SHIFT"}, std::pair{(int16_t)GLFW_KEY_LEFT_CONTROL, "LEFT_CONTROL"}, std::pair{(int16_t)GLFW_KEY_LEFT_ALT, "LEFT_ALT"}, std::pair{(int16_t)GLFW_KEY_LEFT_SUPER, "LEFT_SUPER"}, std::pair{(int16_t)GLFW_KEY_RIGHT_SHIFT, "RIGHT_SHIFT"}, std::pair{(int16_t)GLFW_KEY_RIGHT_CONTROL, "RIGHT_CONTROL"}, std::pair{(int16_t)GLFW_KEY_RIGHT_ALT, "RIGHT_ALT"}, std::pair{(int16_t)GLFW_KEY_RIGHT_SUPER, "RIGHT_SUPER"}, std::pair{(int16_t)GLFW_KEY_MENU, "MENU"}, std::pair{(int16_t)GLFW_KEY_LAST, "LAST"}};
+  auto static inline constexpr mouse_buttons = std::array{std::pair{(int8_t)GLFW_MOUSE_BUTTON_1, "1"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_2, "2"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_3, "3"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_4, "4"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_5, "5"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_6, "6"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_7, "7"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_8, "8"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_LAST, "LAST"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_LEFT, "LEFT"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_RIGHT, "RIGHT"}, std::pair{(int8_t)GLFW_MOUSE_BUTTON_MIDDLE, "MIDDLE"}};
+  static auto open_lib(lua_State *L) -> int // fun()
+  {
+    if (lua_getglobal(L, "game") not_eq LUA_TTABLE)
+      return 0;
+    lua_createtable(L, 0, 3);
+    { // game.input.keys
+      lua_createtable(L, 0, (int)keys.size());
+      for (auto [key, name] : keys)
+        lua_pushinteger(L, key), lua_setfield(L, -2, name);
+      lua_setfield(L, -2, "key");
+    }
+    { // game.input.mouse_buttons
+      lua_createtable(L, 0, (int)mouse_buttons.size());
+      for (auto [mouse_button, name] : mouse_buttons)
+        lua_pushinteger(L, mouse_button), lua_setfield(L, -2, name);
+      lua_setfield(L, -2, "mouse_button");
+    }
+    { // game.input.mb = game.input.mouse_buttons
+      lua_getfield(L, -1, "mouse_button");
+      lua_setfield(L, -2, "mb");
+    }
+    lua_setfield(L, -2, "input");
+    lua_pop(L, 1);
+    return 0;
+  }
+}
+namespace lua::game
+{
+  static auto viewport /*          */ (lua_State *L) -> int // fun(x: integer, y: integer, width: integer, height: integer)
+  {
+    auto static constexpr expected_argc = 4;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %", expected_argc, argc);
+    glViewport(luaL_checkinteger(L, 1), luaL_checkinteger(L, 2), luaL_checkinteger(L, 3), luaL_checkinteger(L, 4));
+    return 0;
+  }
+  static auto camera /*            */ (lua_State *L) -> int // fun(left: number, right: number, bottom: number, top: number)
+  {
+    auto static constexpr expected_argc = 4;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %d", expected_argc, argc);
+    projection = glm::ortho<float>(luaL_checknumber(L, 1), luaL_checknumber(L, 2), luaL_checknumber(L, 3), luaL_checknumber(L, 4));
+    return 0;
+  }
+  static auto tick_rate /*         */ (lua_State *L) -> int // fun(dt?: number): number
+  {
+    auto static constexpr expected_argc = 1;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc and argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %d", expected_argc, argc);
+    if (argc)
+      update_ticker.dt = luaL_checknumber(L, 1);
+    lua_pushnumber(L, update_ticker.dt);
+    return 1;
+  }
+  static auto set_tilesets /*      */ (lua_State *L) -> int // fun(tilesets: game.tileset[])
+  {
+    auto static constexpr expected_argc = 1;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %d", expected_argc, argc);
+    luaL_checktype(L, 1, LUA_TTABLE);
+    auto const error = [&](char const *field, char const *type, bool dont_error = false)
+    {
+      auto str = lua_pushfstring(L, "`tilesets[%d].%s: %s` %s", (int)lua_tointeger(L, -2), field, luaL_typename(L, -1), type);
+      if (not dont_error)
+        lua_error(L);
+      return str;
+    };
+    auto const field = [&]<typename T>(char const *field, T)
+    {
+      lua_getfield(L, -1, field);
+      if constexpr (std::integral<T>)
+      {
+        auto isnum = 0;
+        auto num = lua_tointegerx(L, -1, &isnum);
+        lua_pop(L, 1);
+        if (not isnum)
+          error(field, "was not an integer");
+        return (uint)num;
+      }
+      else // assume string
+      {
+        if (auto str = lua_tostring(L, -1); lua_pop(L, 1), str)
+          return str;
+        error(field, "was not a string");
+        [[unreachable]] throw;
+      }
+    };
+    auto static paths = std::vector<std::string>{};
+    auto const len = luaL_len(L, -1);
+    tilesets /* */.clear(), tilesets /* */.reserve(len);
+    paths /*    */.clear(), paths /*    */.reserve(len);
+    for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1))
+    {
+      auto const count /*   */ = field("count" /*   */, 0u);
+      auto const columns /* */ = field("columns" /* */, 0u);
+      auto const image /*   */ = field("image" /*   */, "");
+      auto const first = tilesets.empty() ? 1 : tilesets.back().last + 1;
+      tilesets.push_back(tileset{
+          .first /*   */ = first,
+          .last /*    */ = first + count,
+          .columns /* */ = columns,
+          .rows /*    */ = count / columns,
+          .tex /*     */ = (uint)tilesets.size(),
+      });
+      if (auto const exists = std::fopen(image, "r"); exists and std::fclose(exists), not exists)
+        luaL_error(L, "%s `%s`", error("tex", "not found", 1), image);
+      paths.emplace_back(image);
+    }
+    lua_settop(L, 1);
+    textures_load(paths);
+    tilesets_upload();
+    return 0;
+  }
+  static auto set_tiles /*         */ (lua_State *L) -> int // fun(tiles: integer[])
+  {
+    auto static constexpr expected_argc = 1;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %d", expected_argc, argc);
+    tiles.clear();
+    tiles.resize(luaL_len(L, 1));
+    for (auto i = 0; i < tiles.size(); i++)
+    {
+      lua_geti(L, 1, 1 + i);
+      tiles.at(i) = lua_tointegerx(L, -1, 0);
+      lua_pop(L, 1);
+    }
+    tiles_upload();
+    return 0;
+  }
+  static auto draw_tiles /*        */ (lua_State *L) -> int // fun(columns: integer, x: integer, y: integer)
+  {
+    auto static constexpr expected_argc = 3;
+    auto const argc = lua_gettop(L);
+    if (expected_argc not_eq argc)
+      luaL_error(L, "Argument count. Excepted %d. Got %d", expected_argc, argc);
+    tiles_draw((uint)luaL_checkinteger(L, 1), (uint)luaL_checkinteger(L, 2), (uint)luaL_checkinteger(L, 3));
+    return 0;
+  }
+  static auto open_lib /*          */ (lua_State *L) -> int // fun()
+  {
+    luaL_Reg static constexpr game[]{
+        {"viewport" /*          */, viewport /*          */},
+        {"camera" /*            */, camera /*            */},
+        {"tick_rate" /*         */, tick_rate /*         */},
+        {"set_tilesets" /*      */, set_tilesets /*      */},
+        {"set_tiles" /*         */, set_tiles /*         */},
+        {"draw_tiles" /*        */, draw_tiles /*        */},
+        {"event", 0},
+        {"input", 0},
+        {0, 0}};
+    luaL_newlib(L, game);
+    lua_setglobal(L, "game");
+    event::open_lib(L);
+    input::open_lib(L);
+    return 0;
+  }
+}
+namespace lua
+{
   static auto init()
   {
     L = {ASSERT(luaL_newstate()), lua_close};
     luaL_openlibs(L);
-    lua::open_lib(L);
-    event_window_init(L);
+    lua::game::open_lib(L);
+    lua::game::event::window_init(L);
   }
 }
 
 static inline void setup()
 {
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glClearColor(0.1, 0.1, 0.1, 0.1);
   glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slot_count);
 
@@ -736,15 +698,15 @@ static inline void setup()
   pid_init(load_glsl_from_file("res/shaders/vert.glsl"),
            load_glsl_from_file("res/shaders/frag.glsl"));
 
-  textures_load(std::vector<std::string>{
-      "res/images/gfx/cave.png",      // 0
-      "res/images/gfx/character.png", // 1
-      "res/images/gfx/font.png",      // 2
-      "res/images/gfx/Inner.png",     // 3
-      "res/images/gfx/log.png",       // 4
-      "res/images/gfx/NPC_test.png",  // 5
-      "res/images/gfx/objects.png",   // 6
-      "res/images/gfx/Overworld.png", // 7
+  textures_load({
+      "res/images/gfx/cave.png"s,      // 0
+      "res/images/gfx/character.png"s, // 1
+      "res/images/gfx/font.png"s,      // 2
+      "res/images/gfx/Inner.png"s,     // 3
+      "res/images/gfx/log.png"s,       // 4
+      "res/images/gfx/NPC_test.png"s,  // 5
+      "res/images/gfx/objects.png"s,   // 6
+      "res/images/gfx/Overworld.png"s, // 7
   });
 
   instances = {
@@ -755,11 +717,11 @@ static inline void setup()
   };
   instances_upload();
 
-  tile_sets = {
-      tile_set{.first = 0, .last = 40 * 36, .columns = 40, .rows = 36, .tex = 7},
+  tilesets = {
+      tileset{.first = 0, .last = 40 * 36, .columns = 40, .rows = 36, .tex = 7},
   };
-  tile_sets.resize(texture_slot_count, tile_sets.at(0));
-  tile_sets_upload();
+  tilesets.resize(texture_slot_count, tilesets.at(0));
+  tilesets_upload();
 
   tiles.resize((size_t)40 * 36);
   std::generate(tiles.begin(), tiles.end(), [i = 0]() mutable
@@ -767,12 +729,19 @@ static inline void setup()
   tiles_upload();
 
   lua::init();
+  if (auto code = "package.path = './res/scripts/?.lua;' .. package.path"; luaL_dostring(L, code) not_eq LUA_OK)
+    std::fprintf(stderr, "Lua Error: %s\n", lua_tolstring(L, -1, 0));
   if (auto path = "res/scripts/main.lua"; luaL_dofile(L, path) not_eq LUA_OK)
     std::fprintf(stderr, "Lua Error: %s\n", lua_tolstring(L, -1, 0));
   lua_settop(L, 0);
-}
 
-static inline void update()
+  if (auto static constexpr global = "game", name = "setup", param = "";
+      lua_getglobal(L, global) == LUA_TTABLE and lua_getfield(L, -1, name) == LUA_TFUNCTION and
+      (lua_pcall(L, *param ? 1 : 0, 0, 0) not_eq LUA_OK))
+    std::fprintf(stderr, "Lua Error in %s.%s(%s): %s\n", global, name, param, lua_tolstring(L, -1, 0)), lua_pop(L, 1);
+  lua_settop(L, 0);
+}
+static inline void update(double dt)
 {
   pid_init(load_glsl_from_file("res/shaders/vert.glsl"),
            load_glsl_from_file("res/shaders/frag.glsl"));
@@ -781,17 +750,14 @@ static inline void update()
     std::fprintf(stderr, "Lua Error: %s\n", lua_tolstring(L, -1, 0));
   lua_settop(L, 0);
 
-  if (lua_getglobal(L, "update"); lua_iscfunction(L, -1))
-    if (lua_pcall(L, 0, 0, 0) not_eq LUA_OK)
-      std::fprintf(stderr, "Lua Error in update(): %s\n", lua_tolstring(L, -1, 0));
+  if (auto static constexpr global = "game", name = "update", param = "dt";
+      lua_getglobal(L, global) == LUA_TTABLE and lua_getfield(L, -1, name) == LUA_TFUNCTION and
+      (lua_pushnumber(L, dt), lua_pcall(L, *param ? 1 : 0, 0, 0) not_eq LUA_OK))
+    std::fprintf(stderr, "Lua Error in %s.%s(%s): %s\n", global, name, param, lua_tolstring(L, -1, 0)), lua_pop(L, 1);
   lua_settop(L, 0);
 }
-
-static inline void loop()
+static inline void draw()
 {
-  for (auto i = size_t{0}; i < update_ticker.max_ticks_per_frame && update_ticker.next(); i++)
-    update();
-
   glClear(GL_COLOR_BUFFER_BIT);
 
   glUseProgram(pid);
@@ -805,22 +771,52 @@ static inline void loop()
 
   glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
 
-  tiles_draw(40);
-  instances_draw();
+  if (auto static constexpr global = "game", name = "draw", param = "";
+      lua_getglobal(L, global) == LUA_TTABLE and lua_getfield(L, -1, name) == LUA_TFUNCTION and
+      (lua_pcall(L, *param ? 1 : 0, 0, 0) not_eq LUA_OK))
+    std::fprintf(stderr, "Lua Error in %s.%s(%s): %s\n", global, name, param, lua_tolstring(L, -1, 0)), lua_pop(L, 1);
+  lua_settop(L, 0);
 
   glfwSwapBuffers(window);
+}
+static inline void loop()
+{
+  for (auto i = size_t{0}; update_ticker.next(); i++)
+    if (i < update_ticker.max_ticks_per_frame)
+      update(update_ticker.dt);
+    else
+      update_ticker.skip();
+
+  draw();
+
   glfwSwapInterval(1);
   glfwPollEvents();
+}
+static inline void shutdown()
+{
+  if (auto static constexpr global = "game", name = "shutdown", param = "";
+      lua_getglobal(L, global) == LUA_TTABLE and lua_getfield(L, -1, name) == LUA_TFUNCTION and
+      (lua_pcall(L, *param ? 1 : 0, 0, 0) not_eq LUA_OK))
+    std::fprintf(stderr, "Lua Error in %s.%s(%s): %s\n", global, name, param, lua_tolstring(L, -1, 0)), lua_pop(L, 1);
+  lua_settop(L, 0);
+  L = {};
+
+  glDeleteVertexArrays(1, &vao);
+  glDeleteBuffers((GLsizei)vbos.size(), vbos.data());
+  glDeleteShader(vid);
+  glDeleteShader(fid);
+  glDeleteProgram(pid);
+  glDeleteTextures((GLsizei)textures.size(), textures.data());
 }
 
 int main()
 {
-#ifdef __EMSCRIPTEN__
   setup();
+#ifdef __EMSCRIPTEN__
   emscripten_set_main_loop(loop, 0, true);
 #else
-  setup();
   while (not glfwWindowShouldClose(window))
     loop();
 #endif
+  shutdown();
 }

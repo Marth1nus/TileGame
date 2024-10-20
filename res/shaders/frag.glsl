@@ -1,8 +1,8 @@
 #version 300 es
 #define TEXTURE_SLOTS {texture_slot_count}u
 
-precision mediump float;
-precision mediump sampler2D;
+precision highp float;
+precision highp sampler2D;
 
 in vec2 mpos;
 in vec2 pos;

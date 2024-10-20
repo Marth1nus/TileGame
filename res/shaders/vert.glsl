@@ -10,10 +10,11 @@ in uint instance_tex;
 in uint tile;
 
 uniform mat4 projection;
-uniform bool use_tiles;
-uniform uint columns;
-struct tile_set { uint first, last, columns, rows, tex, padding[3]; };
-layout(std140) uniform TILE_SETS { tile_set tile_sets[TEXTURE_SLOTS]; };
+
+uniform bool tiles_use;
+uniform ivec4 tiles_chunk;
+struct tileset { uint first, last, columns, rows, tex, padding[3]; };
+layout(std140) uniform TILESETS { tileset tilesets[TEXTURE_SLOTS]; };
 
 out vec2 mpos;
 out vec2 pos;
@@ -23,18 +24,25 @@ flat out uint tex;
 void main()
 {
   mpos = mesh_pos;
-  if (use_tiles)
+  if (tiles_use)
   {
+    if (tile == 0u)
+    {
+      gl_Position = vec4(0);
+      return;
+    }
+    ivec4 chunk = tiles_chunk;
+    uint columns = uint(chunk.z);
     uint id = uint(gl_InstanceID);
-    vec2 tile_pos = vec2(id % columns, id / columns);
+    vec2 tile_pos = vec2(id % columns, id / columns) + vec2(chunk.xy);
     vec2 tile_size = vec2(1);
 
     id = tile;
     uint i = 0u;
     for (; i < TEXTURE_SLOTS; i++)
-      if (tile_sets[i].first <= id && id <= tile_sets[i].last)
+      if (tilesets[i].first <= id && id <= tilesets[i].last)
         break;
-    tile_set ts = tile_sets[i];
+    tileset ts = tilesets[i];
     id -= ts.first;
 
     vec2 tile_uv_pos = vec2(id % ts.columns, id / ts.columns);
