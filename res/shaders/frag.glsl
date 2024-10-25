@@ -1,5 +1,6 @@
 #version 300 es
-#define TEXTURE_SLOTS {texture_slot_count}u
+#define TEXTURE_SLOTS ###u
+#define WEBGL         ###
 
 precision highp float;
 precision highp sampler2D;
@@ -13,11 +14,22 @@ uniform sampler2D textures[TEXTURE_SLOTS];
 
 out vec4 color;
 
+vec4 get_texture_color(uint tex, vec2 uv)
+{
+#if WEBGL
+  for (uint i = 0u; i < TEXTURE_SLOTS; i++)
+    if (i == tex)
+      return texture(textures[i], uv); 
+  return texture(textures[0], uv); 
+#else
+  return texture(textures[tex], uv);
+#endif
+}
+
 void main()
 {
-  vec4 tex_color = texture(textures[tex], uv); // Required for WebGL (Do not modify)
-  color = tex_color;
-  const float o = 0.00f; 
-  if (mpos.x < o || 1.0f - o < mpos.x 
-  ||  mpos.y < o || 1.0f - o < mpos.y) color = vec4(1);
+  color = get_texture_color(tex, uv);
+  vec2 mp = abs(mpos - 0.5f) - 4.f;
+  if (mp.x > 0.f || mp.y > 0.f)
+    color = vec4(1);
 }

@@ -9,6 +9,7 @@
     "dostring",
     "Emscripten",
     "entt",
+    "firstgid",
     "FRAMEBUFFER",
     "getfield",
     "getglobal",
@@ -22,6 +23,8 @@
     "Integerv",
     "iscfunction",
     "isnum",
+    "lfms",
+    "lfns",
     "loadfile",
     "loadfilex",
     "Lsizei",
@@ -51,8 +54,13 @@
     "sptires",
     "stbi",
     "TFUNCTION",
+    "tilecount",
+    "tileheight",
+    "tilelayer",
+    "tilemap",
     "tileset",
     "tilesets",
+    "tilewidth",
     "TNIL",
     "TNUMBER",
     "tointeger",
@@ -142,7 +150,8 @@
     "xstring": "cpp",
     "xtr1common": "cpp",
     "xtree": "cpp",
-    "xutility": "cpp"
+    "xutility": "cpp",
+    "coroutine": "cpp"
   },
   "Lua.workspace.library": ["./src"],
   "Lua.diagnostics.globals": ["game"],
@@ -150,5 +159,6 @@
   "Lua.runtime.path": ["./res/scripts/?.lua", "./res/scripts/lsp/?.lua"],
   "Lua.workspace.checkThirdParty": false,
   "Lua.workspace.ignoreSubmodules": false,
-  "Lua.workspace.useGitIgnore": true
+  "Lua.workspace.useGitIgnore": true,
+  "Lua.diagnostics.disable": ["lowercase-global"]
 }

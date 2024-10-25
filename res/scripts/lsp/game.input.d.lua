@@ -151,3 +151,5 @@ game.input.mouse_button = {
   RIGHT  = 1,
   MIDDLE = 2,
 }
+
+game.input.mb = game.input.mouse_button

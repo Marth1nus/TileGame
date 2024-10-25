@@ -1,41 +1,14 @@
 ---@meta
-
+---@alias  vec2 [number , number ]
+---@alias ivec2 [integer, integer]
 ---@class game
+---@field setup        nil | fun()
+---@field update       nil | fun(dt: number)
+---@field draw         nil | fun()
+---@field shutdown     nil | fun()
+---@field viewport     fun(x: integer, y: integer, width: integer, height: integer)
+---@field camera       fun(left: number, right: number, bottom: number, top: number)
+---@field tick_rate    fun(dt?: number): number
+---@field prep_tilemap fun(map: tiled.map)
+---@field draw_tiles   fun()
 game = {}
-
----@alias vec2 [number, number]
-
----@type nil | fun()
-game.setup = nil
-
----@type nil | fun(dt: number)
-game.update = nil
-
----@type nil | fun()
-game.draw = nil
-
----@type nil | fun()
-game.shutdown = nil
-
----@type fun(x: integer, y: integer, width: integer, height: integer)
-function game.viewport() end
-
----@type fun(left: number, right: number, bottom: number, top: number)
-function game.camera() end
-
----@type fun(dt?: number): number
-function game.tick_rate() end
-
----@class game.tileset
----@field count    integer
----@field columns  integer
----@field image    string
-
----@type fun(tilesets: game.tileset[])
-function game.set_tilesets() end
-
----@type fun(tiles: integer[])
-function game.set_tiles() end
-
----@type fun(columns: integer, x: integer, y: integer)
-function game.draw_tiles() end
