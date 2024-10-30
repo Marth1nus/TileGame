@@ -15,14 +15,11 @@
 ---@field tilesets     tiled.map.tileset[]
 ---@field layers       tiled.map.layer[]
 
----@alias tiled.map.tileset tiled.map.tileset.exported | tiled.map.tileset.embedded
----@class tiled.map.tileset.base
----@field name           string
----@field firstgid       integer
----@field filename       string
----@class tiled.map.tileset.exported : tiled.map.tileset.base
----@field exportfilename string
----@class tiled.map.tileset.embedded : tiled.map.tileset.base
+---@class tiled.map.tileset
+---@field name            string
+---@field firstgid        integer
+---@field filename        string
+---@field exportfilename  string?
 ---@field version         "1.10"
 ---@field luaversion      "5.1"
 ---@field tiledversion    "1.11.0"
@@ -101,40 +98,43 @@
 ---@field visible    true
 ---@field properties table
 
+tiled = tiled or {}
 
-game.map = {
-  folder          = "res/maps/",
-  tilesets_folder = "res/maps/tilesets/",
+tiled.map = {
+  maps_path_fmt = "res/maps/%s.tmx.lua",
   ---@type tiled.map?
-  loaded          = nil,
+  loaded        = nil,
 }
 
 ---@param filepath string
----@return any
-function game.map.load_config_file_safe(filepath)
-  return assert(loadfile(filepath, nil, {}))()
+---@return table
+function tiled.map.load_config_file_safe(filepath)
+  local config = assert(loadfile(filepath, nil, {}))()
+  assert(type(config) == "table", "config file must return a table of values")
+  return config
 end
 
 ---@param name string
 ---@return tiled.map
-function game.map.load(name)
-  ---@type tiled.map
-  local map = game.map.load_config_file_safe(game.map.folder .. name .. ".lua")
+function tiled.map.load(name)
+  local map_filepath = tiled.map.maps_path_fmt:format(name)
+  local map_folder   = map_filepath:match("^(.*[/\\])") --[[@as string]]
+  local map          = tiled.map.load_config_file_safe(map_filepath) --[[@as tiled.map]]
   for tileset_i, tileset in ipairs(map.tilesets) do
     if tileset.exportfilename then
-      local filepath = game.map.folder .. tileset.exportfilename
-      local folder = filepath:match("^(.*[/\\])")
-      ---@type tiled.map.tileset.embedded
-      local extended = game.map.load_config_file_safe(filepath)
-      for key, value in pairs(tileset) do
-        extended[key] = value;
+      local tileset_filepath  = map_folder .. tileset.exportfilename;
+      local tileset_folder    = tileset_filepath:match("^(.*[/\\])") --[[@as string]]
+      local export            = tileset
+      tileset                 = tiled.map.load_config_file_safe(tileset_filepath) --[[@as tiled.map.tileset]]
+      map.tilesets[tileset_i] = tileset
+      for key, value in pairs(export) do
+        tileset[key] = value
       end
-      extended.image = folder .. extended.image
-      map.tilesets[tileset_i] = extended;
+      tileset.image = tileset_folder .. tileset.image
     end
   end
-  game.map.loaded = map;
+  tiled.map.loaded = map;
   return map;
 end
 
-return game.map
+return tiled.map

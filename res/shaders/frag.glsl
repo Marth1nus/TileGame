@@ -1,6 +1,4 @@
 #version 300 es
-#define TEXTURE_SLOTS ###u
-#define WEBGL         ###
 
 precision highp float;
 precision highp sampler2D;
@@ -29,7 +27,9 @@ vec4 get_texture_color(uint tex, vec2 uv)
 void main()
 {
   color = get_texture_color(tex, uv);
-  vec2 mp = abs(mpos - 0.5f) - 4.f;
-  if (mp.x > 0.f || mp.y > 0.f)
-    color = vec4(1);
+  // vec2 mp = mpos;
+  // float s = 0.01f;
+  // if (mp.x <= s || 1.0f - s <= mp.x
+  // ||  mp.y <= s || 1.0f - s <= mp.y)
+  //   color = vec4(1);
 }

@@ -1,4 +1,4 @@
-require("game.map")
+game.map = require("tiled.map")
 
 game.state = game.state or {
   view_width = 16,
@@ -29,6 +29,11 @@ utils = {
   end,
 }
 
+on_key_press = {
+  [game.input.key.DELETE] = function() print("\027[2J\027[H") end,
+  [game.input.key.INSERT] = function() game.prep_tilemap(game.map.load("main")) end,
+}
+
 key_down = key_down or {}
 function game.event.on_key(key, _, action)
   if not key_down_reverse then
@@ -43,11 +48,7 @@ function game.event.on_key(key, _, action)
   key_down[char] = key_down[key]
   print("Key", char, key)
   if action == game.input.action.PRESS then
-    okdr = okdr or {
-      [game.input.key.DELETE] = function() print("\027[2J\027[H") end,
-      [game.input.key.INSERT] = function() game.prep_tilemap(game.map.load("main")) end,
-    }
-    local f = okdr[key]
+    local f = on_key_press[key]
     if f then f() end
   end
 end
