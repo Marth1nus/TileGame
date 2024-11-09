@@ -1,3 +1,6 @@
+#define TEXTURE_SLOTS 16u
+#define WEBGL          0
+// Evereything before here is ignored (defines added back at pre-compile-time)
 #version 300 es
 
 precision highp float;

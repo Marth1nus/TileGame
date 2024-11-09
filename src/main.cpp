@@ -1,5 +1,6 @@
 #include <cstdio>
 
+#include <expected>
 #include <stdexcept>
 #include <type_traits>
 #include <concepts>
@@ -57,22 +58,160 @@ using glm::vec2, glm::uvec2, glm::ivec2, glm::uint,
 
 namespace utils
 {
-  template <typename... T>
-  struct overload : T...
+  struct immutable_string
   {
-    using T::operator()...;
+  public:
+    template <std::convertible_to<std::string_view> T>
+    inline constexpr immutable_string(T &&str) noexcept
+        : immutable_string(static_cast<std::string_view>(str),
+                           std::convertible_to<T, char const *> or std::same_as<T, std::string>,                  // char const[] and std::string are expected to null terminated
+                           std::is_rvalue_reference_v<decltype(str)> and not std::is_trivially_destructible_v<T>) // clone if `std::string&&`-like
+    {
+    }
+    inline constexpr immutable_string(std::string_view str, bool null_terminated = 0, bool clone = 0) noexcept
+    {
+      (m_string /*             */ = str.data() /* */);
+      (m_size /*               */ = str.size() /* */);
+      (m_has_allocation /*     */ = false /*      */);
+      (m_is_null_terminated /* */ = null_terminated and m_string[m_size] == '\0');
+      if (clone)
+        *this = this->clone();
+    }
+    inline constexpr immutable_string() noexcept = default;
+    inline constexpr immutable_string(immutable_string &&o) noexcept
+    {
+      (m_string /*             */ = o.m_string /*             */), (o.m_string /*             */ = 0);
+      (m_size /*               */ = o.m_size /*               */), (o.m_size /*               */ = 0);
+      (m_has_allocation /*     */ = o.m_has_allocation /*     */), (o.m_has_allocation /*     */ = 0);
+      (m_is_null_terminated /* */ = o.m_is_null_terminated /* */), (o.m_is_null_terminated /* */ = 0);
+    }
+    inline constexpr immutable_string(immutable_string const &o) noexcept
+    {
+      (m_string /*             */ = o.m_string /*             */);
+      (m_size /*               */ = o.m_size /*               */);
+      (m_has_allocation /*     */ = o.m_has_allocation /*     */);
+      (m_is_null_terminated /* */ = o.m_is_null_terminated /* */);
+      if (m_has_allocation)
+        ++*m_ref_count();
+    }
+    inline constexpr ~immutable_string() noexcept
+    {
+      if (m_has_allocation and --*m_ref_count() == 0)
+        ::operator delete(m_ref_count(), std::align_val_t(alignof(size_t)));
+      (m_string /*             */ = 0);
+      (m_size /*               */ = 0);
+      (m_has_allocation /*     */ = 0);
+      (m_is_null_terminated /* */ = 0);
+    }
+
+    inline constexpr auto operator=(immutable_string &&o) noexcept -> immutable_string &
+    {
+      if (this == &o)
+        return *this;
+      this->~immutable_string();
+      return *new (this) immutable_string(std::forward<decltype(o)>(o));
+    }
+    inline constexpr auto operator=(immutable_string const &o) noexcept -> immutable_string &
+    {
+      if (this == &o)
+        return *this;
+      this->~immutable_string();
+      return *new (this) immutable_string(std::forward<decltype(o)>(o));
+    }
+
+    inline constexpr auto has_allocation() const noexcept -> bool { return m_has_allocation; }
+    inline constexpr auto null_terminated() const noexcept -> bool { return m_is_null_terminated; }
+    inline constexpr auto view() const noexcept -> std::string_view { return {m_string, m_size}; }
+    inline constexpr auto c_str() const noexcept -> char const * { return m_is_null_terminated ? m_string : nullptr; }
+
+    inline constexpr auto operator==(immutable_string const &o) const noexcept { return view() == o.view(); }
+    inline constexpr auto operator<=>(immutable_string const &o) const noexcept { return view() <=> o.view(); }
+    inline constexpr operator std::string_view() const { return view(); }
+
+    [[nodiscard("immutable_string::clone returns an allocating string")]]
+    auto clone(bool deep = false) const noexcept -> immutable_string
+    {
+      auto res = *this;
+      if (res.has_allocation() and not deep)
+        return res;
+
+      auto const view = res.view();
+      if (view.empty())
+        return res;
+
+      auto const buf = ::operator new(sizeof(*m_ref_count()) + sizeof(*m_string) * (view.size() + 1), // m_ref_count + m_string
+                                      std::align_val_t(alignof(size_t)));
+      auto const ref = new (buf) size_t{1};
+      auto const str = reinterpret_cast<char *>(ref + 1);
+      std::copy(view.begin(), view.end(), str)[0] = '\0';
+
+      res.m_string /*             */ = str;
+      res.m_size /*               */ = view.size();
+      res.m_has_allocation /*     */ = true;
+      res.m_is_null_terminated /* */ = true;
+      *res.m_ref_count() /*       */ = 1;
+      return res;
+    }
+    inline constexpr auto c_str(bool force) noexcept -> char const *
+    {
+      if (force and not null_terminated())
+        *this = clone();
+      return c_str();
+    }
+
+  private:
+    char const *m_string = nullptr;
+    size_t m_size = 0;
+    bool m_has_allocation : 1 = false;
+    bool m_is_null_terminated : 1 = false;
+    // member `m_ref_count` only exists if `m_has_allocation` and is located before `m_string` in that case
+    inline constexpr auto m_ref_count() const noexcept -> size_t *
+    {
+      return not m_has_allocation ? nullptr : const_cast<size_t *>(reinterpret_cast<size_t const *>(m_string) - 1);
+    }
   };
-  template <size_t N>
-  struct CTS
+  [[nodiscard("May return an allocated string")]]
+  auto static vsnprintf(char buf[], size_t cap, char const *fmt, va_list args) -> std::pair<std::string_view, std::unique_ptr<char[]>>
   {
-    char str[N];
-  };
+    auto len = cap;
+    auto str = std::unique_ptr<char[]>{};
+    auto msg = buf;
+    for (;;) // snprintf until len < cap
+    {
+      va_list args_copy;
+      va_copy(args_copy, args);
+      len = std::vsnprintf(msg, cap, fmt, args_copy);
+      va_end(args_copy);
+      if (len < cap) [[likely]]
+        break;
+      cap = len + 1;
+      str = std::unique_ptr<char[]>(new char[cap]);
+      msg = str.get();
+    }
+    return {{msg, len}, std::move(str)};
+  }
+  [[nodiscard("May return an allocated string")]]
+  printf_fmt_check_attribute auto static snprintf(char buf[], size_t cap, printf_fmt_check char const *fmt, ...) -> decltype(vsnprintf(buf, cap, fmt, va_list{}))
+  {
+    va_list args;
+    va_start(args, fmt);
+    auto res = vsnprintf(buf, cap, fmt, args);
+    va_end(args);
+    return res;
+  }
+  template <size_t cap>
+  printf_fmt_check_attribute auto static snprintf(char (&buf)[cap], printf_fmt_check char const *fmt, ...) -> decltype(vsnprintf(buf, cap, fmt, va_list{}))
+  {
+    va_list args;
+    va_start(args, fmt);
+    auto res = vsnprintf(buf, cap, fmt, args);
+    va_end(args);
+    return res;
+  }
   struct failed_assert : std::runtime_error
   {
     using std::runtime_error::runtime_error;
   };
-#define ASSERT(...) utils::assert((__VA_ARGS__), #__VA_ARGS__)
-#define DEBUG_ASSERT(...) utils::assert((__VA_ARGS__), #__VA_ARGS__)
   auto inline static constexpr assert(auto &&value, char const *msg) -> decltype(value)
   {
     if (value) [[likely]]
@@ -84,36 +223,11 @@ namespace utils
     if (value) [[likely]]
       return std::forward<decltype(value)>(value);
     char buf[0x100];
-    auto cap = std::size(buf), len = cap;
-    auto str = std::unique_ptr<char[]>{};
-    auto msg = buf;
-    for (;;) // snprintf until len < cap
-    {
-      va_list args;
-      va_start(args, fmt);
-      len = std::vsnprintf(msg, cap, fmt, args);
-      va_end(args);
-      if (len < cap) [[likely]]
-        break;
-      cap = len + 1;
-      str = std::unique_ptr<char[]>(new char[cap]);
-      msg = str.get();
-    }
-    throw failed_assert(msg);
-  }
-  auto static glCheckError()
-  {
-    for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
-    {
-      auto str = /* clang-format off */ [err]{ switch (err) {
-        case GL_INVALID_ENUM:                  return "GL_INVALID_ENUM";
-        case GL_INVALID_VALUE:                 return "GL_INVALID_VALUE";
-        case GL_INVALID_OPERATION:             return "GL_INVALID_OPERATION";
-        case GL_OUT_OF_MEMORY:                 return "GL_OUT_OF_MEMORY";
-        case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
-        default:                               return "UNKNOWN_ERROR"; } }(); /* clang-format on */
-      std::fprintf(stderr, "\033[31mOpenGL ES error 0x%x %s\n\033[0m", err, str);
-    }
+    va_list args;
+    va_start(args, fmt);
+    auto [msg, alloc] = vsnprintf(buf, std::size(buf), fmt, args);
+    va_end(args);
+    throw failed_assert(msg.data());
   }
   auto static inline file_read_all(char const *filepath) -> std::string
   {
@@ -126,6 +240,8 @@ namespace utils
     std::fclose(file);
     return res;
   }
+  /* clang-format off */ template <typename... T> struct overload : T... {}; /* clang-format on */
+  /* clang-format off */ template <typename T, size_t N> struct compile_time_array_wrapper { T arr[N]; }; /* clang-format on */
   template <typename T>
   struct shared
   {
@@ -144,8 +260,17 @@ namespace utils
     inline constexpr shared(T *ptr, auto &&deleter) noexcept : ptr(ptr, std::forward<decltype(deleter)>(deleter)) {}
     inline constexpr operator T *() const noexcept { return ptr.get(); }
   };
+#define ASSERT(...) utils::assert((__VA_ARGS__), #__VA_ARGS__)
+#define DEBUG_ASSERT(...) utils::assert((__VA_ARGS__), #__VA_ARGS__)
 }
-using utils::shared, utils::overload, utils::glCheckError;
+using utils::shared, utils::overload;
+namespace std
+{
+  template <>
+  struct hash<::utils::immutable_string> : hash<string_view>
+  {
+  };
+}
 
 static struct glfw
 {
@@ -156,8 +281,6 @@ static auto window = []()
 {
   auto width = 720, height = width;
   auto title = "TileGame";
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
   auto window = shared{glfwCreateWindow(width, height, title, 0, 0), glfwDestroyWindow};
   glfwMakeContextCurrent(ASSERT(window));
 #ifdef __EMSCRIPTEN__
@@ -165,72 +288,25 @@ static auto window = []()
   ASSERT(gladLoadGLES2(glfwGetProcAddress));
 #endif
   glViewport(0, 0, width, height);
-  glCheckError();
   return window;
 }();
 
 namespace render
 {
-  template <typename T>
-  struct buffer
+  auto static glCheckError()
   {
-    GLuint const &buffer;
-    GLenum buffer_type;
-    std::vector<T> data{};
-    size_t buffer_capacity{}, buffer_size{};
-    auto upload()
+    for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
     {
-      glBindBuffer(buffer_type, buffer);
-      if (buffer_capacity not_eq data.capacity())
-        glBufferData(buffer_type, GLsizei((buffer_capacity = data.capacity()) * sizeof(data.at(0))), nullptr, GL_DYNAMIC_DRAW);
-      buffer_size = data.size();
-      if (auto bytes = std::as_bytes(std::span(data)); not bytes.empty())
-        glBufferSubData(buffer_type, 0, (GLsizei)bytes.size(), bytes.data());
-      glCheckError();
+      auto str = /* clang-format off */ [err]{ switch (err) {
+        case GL_INVALID_ENUM:                  return "GL_INVALID_ENUM";
+        case GL_INVALID_VALUE:                 return "GL_INVALID_VALUE";
+        case GL_INVALID_OPERATION:             return "GL_INVALID_OPERATION";
+        case GL_OUT_OF_MEMORY:                 return "GL_OUT_OF_MEMORY";
+        case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
+        default:                               return "UNKNOWN_ERROR"; } }(); /* clang-format on */
+      std::fprintf(stderr, "\033[31mOpenGL ES error 0x%x %s\n\033[0m", err, str);
     }
-    auto update(size_t offset = 0, size_t size = ~0ull)
-    {
-      if (buffer_capacity < data.capacity())
-        return upload();
-      size = std::min(size, data.size() - offset);
-      glBindBuffer(buffer_type, buffer);
-      glBufferSubData(buffer_type, offset * sizeof(data.at(0)), size * sizeof(data.at(0)), data.data() + offset);
-    }
-  };
-  struct instance
-  {
-    vec2 pos{0, 0}, size{1, 1}, uv_pos{0, 0}, uv_size{1, 1};
-    uint tex{0};
-  };
-  struct tileset
-  {
-    uint first, last, columns, rows,
-        tex, padding0, padding1, padding2;
-    vec2 tile_offset, tile_size{1, 1};
-  };
-  struct tiles_chunk
-  {
-    ivec2 pos, size;
-  };
-  static auto vao = GLuint{};
-  static auto vbos = std::array<GLuint, 5>{};
-  static auto const &[vertices_vbo, instances_vbo, tiles_vbo, tiles_chunks_vbo, tilesets_ubo] = vbos;
-  static auto constexpr vertices = std::array{vec2{0, 0}, vec2{0, 1}, vec2{1, 0}, vec2{1, 1}};
-  static auto tiles /*        */ = buffer<uint /*        */>{tiles_vbo /*        */, GL_ARRAY_BUFFER};
-  static auto tiles_chunks /* */ = buffer<tiles_chunk /* */>{tiles_chunks_vbo /* */, GL_UNIFORM_BUFFER};
-  static auto tilesets /*     */ = buffer<tileset /*     */>{tilesets_ubo /*     */, GL_ARRAY_BUFFER};
-  static auto tiles_chunk_attrib = size_t{7};
-  static GLuint vid, fid, pid;
-  static struct
-  {
-    GLint projection,
-        TILESETS,
-        tiles_use,
-        tilesets_count,
-        textures;
-  } uniform{};
-  static auto projection = glm::ortho<float>(0, 32, 0, 32);
-
+  }
   [[nodiscard("Returns 0 or a shader object. glDeleteShader to delete.")]]
   static auto make_shader(GLenum type, std::string_view glsl, std::string_view defines)
   {
@@ -296,88 +372,7 @@ namespace render
     auto defines = std::string_view(buf, buf_len);
     return make_program(vert_glsl, frag_glsl, defines);
   }
-  static auto pid_init(std::string_view vert_glsl, std::string_view frag_glsl)
-  {
-    if (pid)
-      glDeleteProgram(pid);
-
-    auto texture_slots = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slots);
-    pid = make_program(vert_glsl, frag_glsl, texture_slots);
-
-    glUseProgram(pid);
-    uniform.projection /*      */ = glGetUniformLocation(pid, "projection" /*      */);
-    uniform.TILESETS /*        */ = glGetUniformBlockIndex(pid, "TILESETS" /*      */);
-    uniform.tiles_use /*       */ = glGetUniformLocation(pid, "tiles_use" /*       */);
-    uniform.tilesets_count /*  */ = glGetUniformLocation(pid, "tilesets_count" /*  */);
-    uniform.textures /*        */ = glGetUniformLocation(pid, "textures" /*        */);
-    glCheckError();
-
-    auto textures = std::vector<int>((size_t)texture_slots);
-    std::generate(textures.begin(), textures.end(), [i = 0]() mutable
-                  { return i++; });
-
-    glUniformMatrix4fv(uniform.projection, 1, 0, &projection[0][0]);
-    glUniformBlockBinding(pid, uniform.TILESETS, 0);
-    glUniform1ui(uniform.tiles_use, false);
-    glUniform1ui(uniform.tilesets_count, 0);
-    glUniform1iv(uniform.textures, (GLsizei)textures.size(), textures.data());
-    glCheckError();
-  }
-  static inline auto vao_init()
-  {
-    glGenVertexArrays(1, &vao);
-    glGenBuffers((GLsizei)vbos.size(), vbos.data());
-
-    glBindVertexArray(vao);
-    auto const bytes = std::as_bytes(std::span(vertices));
-    auto i = 0;
-
-    glBindBuffer(GL_ARRAY_BUFFER, vertices_vbo);
-    glBufferData(GL_ARRAY_BUFFER, bytes.size(), bytes.data(), GL_STATIC_DRAW);
-    glCheckError();
-
-    glVertexAttribPointer(i, 2, GL_FLOAT, GL_FALSE, (GLsizei)sizeof(vec2), (void *)0);
-    glEnableVertexAttribArray(i++);
-    glCheckError();
-
-    glBindBuffer(GL_ARRAY_BUFFER, tiles.buffer);
-    glBufferData(GL_ARRAY_BUFFER, 0x10, nullptr, GL_DYNAMIC_DRAW);
-    glCheckError();
-
-    glVertexAttribIPointer(i, 1, GL_UNSIGNED_INT, sizeof(tiles.data.at(0)), (void *)0);
-    glVertexAttribDivisor(i, 1);
-    glEnableVertexAttribArray(i++);
-    glCheckError();
-
-    glBindBuffer(GL_ARRAY_BUFFER, tiles_chunks.buffer);
-    glBufferData(GL_ARRAY_BUFFER, 0x10, nullptr, GL_DYNAMIC_DRAW);
-    glCheckError();
-
-    tiles_chunk_attrib = i;
-    glVertexAttribIPointer(i, 4, GL_INT, sizeof(tiles_chunks.data.at(0)), (void *)0);
-    glVertexAttribDivisor(i, 0xffffffff);
-    glEnableVertexAttribArray(i++);
-    glCheckError();
-
-    glBindBuffer(GL_UNIFORM_BUFFER, tilesets_ubo);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, tilesets_ubo);
-    glCheckError();
-  }
-
-  static inline auto tiles_draw()
-  {
-    auto chunk = tiles_chunks.data.at(0);
-    glUniform1ui(uniform.tiles_use, true);
-    glUniform1ui(uniform.tilesets_count, (GLuint)tilesets.data.size());
-    glVertexAttribDivisor(tiles_chunk_attrib, chunk.size.x * chunk.size.y);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tiles.data.size());
-    glCheckError();
-  }
-
-  static auto textures = std::vector<GLuint>{};
-  static auto textures_paths = std::vector<std::string>{};
-  static inline auto texture_load(GLuint tid, char const *path)
+  static auto texture_load(GLuint tid, char const *path)
   {
     glBindTexture(GL_TEXTURE_2D, tid);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -390,24 +385,6 @@ namespace render
     stbi_image_free(pixels);
     glGenerateMipmap(GL_TEXTURE_2D);
     glCheckError();
-  }
-  static inline auto textures_load(std::vector<std::string> files)
-  {
-    if (not textures.empty())
-      glDeleteTextures((GLsizei)textures.size(), textures.data());
-
-    auto texture_slots = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_slots);
-    textures.resize(std::min<size_t>(std::size(files), texture_slots));
-    if (not textures.empty())
-      glGenTextures((GLsizei)textures.size(), textures.data());
-    textures_paths = std::move(files);
-    for (auto i = 0u; i < textures.size(); i++)
-      texture_load(textures.at(i), textures_paths.at(i).c_str());
-  }
-  static inline auto textures_clear()
-  {
-    textures_load({});
   }
 }
 
@@ -446,20 +423,22 @@ namespace render::tile
         tex, padding0, padding1, padding2;
     glm::vec2 offset, size;
   };
+  auto inline static constexpr vertices = std::array{
+      std::array{0.0f, 0.0f},
+      std::array{0.0f, 1.0f},
+      std::array{1.0f, 0.0f},
+      std::array{1.0f, 1.0f},
+  };
   struct renderer
   {
   public:
     auto delete_program(bool expect_fail = false)
     {
-      if (not m_pid)
-      {
-        if (expect_fail)
-          return;
-        else
-          utils::assertf(false, "can not delete a deleted %s", "program");
-      }
-      glDeleteProgram(m_pid), pid = 0;
+      utils::assertf(m_pid or expect_fail, "can not delete a deleted %s", "program");
+      glDeleteProgram(m_pid), m_pid = 0;
+      glCheckError();
       m_uniform = {};
+      m_uniform_locations.clear();
       return;
     }
     auto reload_program(std::string_view vert_glsl, std::string_view frag_glsl)
@@ -475,56 +454,66 @@ namespace render::tile
 
       glUseProgram(pid);
       m_uniform = {
-          .projection /*      */ = glGetUniformLocation(pid, "projection" /*      */),
           .TILESETS /* */ = (int)glGetUniformBlockIndex(pid, "TILESETS" /*        */),
-          .tiles_use /*       */ = glGetUniformLocation(pid, "tiles_use" /*       */),
           .tilesets_count /*  */ = glGetUniformLocation(pid, "tilesets_count" /*  */),
+          .projection /*      */ = glGetUniformLocation(pid, "projection" /*      */),
           .textures /*        */ = glGetUniformLocation(pid, "textures" /*        */),
       };
       glCheckError();
 
-      auto projection = glm::ortho<float>(-1, 1, 1, -1);
-      auto textures = std::vector<int>((size_t)texture_slots);
-      for (auto i = 0u; auto &tex : textures)
-        tex = i++;
+      auto const textures = std::unique_ptr<GLint[]>(new GLint[texture_slots]);
+      for (auto i = 0; i < texture_slots; i++)
+        textures[i] = i;
 
-      glUniformMatrix4fv(m_uniform.projection, 1, 0, &projection[0][0]);
-      glUniformBlockBinding(pid, m_uniform.TILESETS, 0);
-      glUniform1ui(m_uniform.tiles_use, false);
-      glUniform1ui(m_uniform.tilesets_count, 0);
-      glUniform1iv(m_uniform.textures, (GLsizei)textures.size(), textures.data());
+      glUniformBlockBinding(pid, m_uniform.TILESETS /*       */, 0);
+      glUniform1ui /*        */ (m_uniform.tilesets_count /* */, 0);
+      glUniformMatrix4fv /*  */ (m_uniform.projection /*     */, 1, 0, &projection[0][0]);
+      glUniform1iv /*        */ (m_uniform.textures /*       */, texture_slots, textures.get());
       glCheckError();
 
       return true;
     }
-    auto inline use_program() const noexcept { glUseProgram(m_pid); }
+    auto inline use_program() noexcept { glUseProgram(m_pid); }
     auto inline get_program() const noexcept { return m_pid; }
-    auto inline uniform() const noexcept -> auto & { return m_uniform; }
+    auto inline get_uniforms() const noexcept -> auto & { return m_uniform; }
+    auto get_uniform_location(std::string_view name) -> GLint
+    {
+      if (auto find = m_uniform_locations.find(name);
+          find not_eq m_uniform_locations.end())
+        return find->second;
+      auto name_str = utils::immutable_string(name).clone();
+      auto location = glGetUniformLocation(m_pid, name_str.c_str());
+      m_uniform_locations.insert({std::move(name_str), location});
+      glCheckError();
+      return location;
+    }
+    auto update_uniforms()
+    {
+      glCheckError();
+      glUniform1ui(m_uniform.tilesets_count, tileset_count);
+      glCheckError();
+      glVertexAttribDivisor(m_chunks_attrib, chunk_len);
+      glCheckError();
+      glUniformMatrix4fv(m_uniform.projection, 1, GL_FALSE, &projection[0][0]);
+      glCheckError();
+    }
 
     auto delete_vao(bool expect_fail = false)
     {
-      if (not m_vao)
-      {
-        if (expect_fail)
-          return;
-        else
-          utils::assertf(false, "can not delete a deleted %s", "mesh");
-      }
+      utils::assertf(m_vao or expect_fail, "can not delete a deleted %s", "mesh");
       glDeleteVertexArrays(1, &m_vao), m_vao = 0;
       auto buffers = std::array{&m_vertices, &m_tiles, &m_chunks, &m_tilesets};
       auto bos = std::array<GLuint, buffers.size()>{};
       for (auto i = 0u; i < buffers.size(); i++)
         bos.at(i) = std::exchange(*buffers.at(i), {}).bo;
       glDeleteBuffers((GLsizei)bos.size(), bos.data());
-      m_chunk_len = {};
+      chunk_len = 0xffffffffu;
+      glCheckError();
     }
-    auto reload_vao(size_t chunk_len)
+    auto reload_vao()
     {
       using namespace glm;
       delete_vao(1);
-
-      m_chunk_len = (GLuint)chunk_len;
-      utils::assertf(m_chunk_len > 8 * 8, "Chunk length must be at least %d", 8 * 8);
 
       auto &vao = m_vao;
       glGenVertexArrays(1, &vao);
@@ -538,16 +527,11 @@ namespace render::tile
         glCheckError();
         return bos;
       }();
-      auto static constexpr vertices = std::array{
-          std::array{0.0f, 0.0f},
-          std::array{0.0f, 1.0f},
-          std::array{1.0f, 0.0f},
-          std::array{1.0f, 1.0f},
-      };
       auto const bytes = std::as_bytes(std::span(vertices));
       auto i = 0u;
 
       glBindVertexArray(vao);
+      glCheckError();
 
       glBindBuffer(GL_ARRAY_BUFFER, vbo_vertices);
       glBufferData(GL_ARRAY_BUFFER, (GLsizei)bytes.size(), bytes.data(), GL_STATIC_DRAW);
@@ -573,7 +557,7 @@ namespace render::tile
 
       m_chunks_attrib = i;
       glVertexAttribIPointer(i, 4, GL_INT, sizeof(chunk), (void *)offsetof(chunk, pos));
-      glVertexAttribDivisor(i, m_chunk_len);
+      glVertexAttribDivisor(i, chunk_len);
       glEnableVertexAttribArray(i++);
       glCheckError();
 
@@ -583,33 +567,18 @@ namespace render::tile
 
       return true;
     }
-    auto inline bind_vao() const noexcept { glBindVertexArray(m_vao); }
+    auto inline bind_vao() noexcept { glBindVertexArray(m_vao); }
     auto inline get_vao() const noexcept { return m_vao; }
-
-    auto inline upload(std::span<tile /*    */ const> data) { return m_tiles /*    */.upload(std::as_bytes(data), GL_ARRAY_BUFFER /*   */, GL_DYNAMIC_DRAW); }
-    auto inline upload(std::span<chunk /*   */ const> data) { return m_chunks /*   */.upload(std::as_bytes(data), GL_ARRAY_BUFFER /*   */, GL_DYNAMIC_DRAW); }
-    auto inline upload(std::span<tileset /* */ const> data) { return m_tilesets /* */.upload(std::as_bytes(data), GL_UNIFORM_BUFFER /* */, GL_DYNAMIC_DRAW); }
-
-    auto inline update(std::span<tile /*    */ const> data, size_t offset = 0) { return m_tiles /*    */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_ARRAY_BUFFER /*   */); }
-    auto inline update(std::span<chunk /*   */ const> data, size_t offset = 0) { return m_chunks /*   */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_ARRAY_BUFFER /*   */); }
-    auto inline update(std::span<tileset /* */ const> data, size_t offset = 0) { return m_tilesets /* */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_UNIFORM_BUFFER /* */); }
-
-    auto inline update_chunk_data(int chunk_index, std::span<tile const> data, size_t offset = 0) { return update(data, m_chunk_len * chunk_index + offset); }
 
     auto delete_textures(bool expect_fail = false)
     {
-      if (m_textures.empty())
-      {
-        if (expect_fail)
-          return;
-        else
-          utils::assertf(false, "can not delete a deleted %s", "textures-array");
-      }
+      utils::assertf(not m_textures.empty() or expect_fail, "can not delete a deleted %s", "textures-array");
       glDeleteTextures((GLsizei)m_textures.size(), m_textures.data());
       m_textures.clear();
       m_texture_paths.clear();
+      glCheckError();
     }
-    auto reload_textures(std::vector<std::string> image_paths)
+    auto reload_textures(std::vector<std::string> &&image_paths)
     {
       delete_textures(1);
       m_texture_paths = std::move(image_paths);
@@ -619,32 +588,63 @@ namespace render::tile
         texture_load(m_textures.at(i), m_texture_paths.at(i).c_str());
       glCheckError();
     }
+    auto bind_textures() const noexcept
+    {
+      for (auto i = size_t{0}; i < m_textures.size(); i++)
+      {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, m_textures.at(i));
+      }
+      glCheckError();
+    }
+
+    auto inline upload(std::span<tile /*    */ const> data) { return m_tiles /*    */.upload(std::as_bytes(data), GL_ARRAY_BUFFER /*   */, GL_DYNAMIC_DRAW); }
+    auto inline upload(std::span<chunk /*   */ const> data) { return m_chunks /*   */.upload(std::as_bytes(data), GL_ARRAY_BUFFER /*   */, GL_DYNAMIC_DRAW); }
+    auto inline upload(std::span<tileset /* */ const> data) { return m_tilesets /* */.upload(std::as_bytes(data), GL_UNIFORM_BUFFER /* */, GL_DYNAMIC_DRAW); }
+
+    auto inline update(std::span<tile /*    */ const> data, size_t offset = 0) { return m_tiles /*    */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_ARRAY_BUFFER /*   */); }
+    auto inline update(std::span<chunk /*   */ const> data, size_t offset = 0) { return m_chunks /*   */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_ARRAY_BUFFER /*   */); }
+    auto inline update(std::span<tileset /* */ const> data, size_t offset = 0) { return m_tilesets /* */.update(std::as_bytes(data), offset * sizeof(data[0]), GL_UNIFORM_BUFFER /* */); }
+
+    auto inline update_chunk(int chunk_index, std::span<tile const> data, size_t offset = 0) { return update(data, chunk_len * chunk_index + offset); }
 
     auto prep_draw()
     {
       use_program();
       bind_vao();
+      bind_textures();
+      glCheckError();
     }
     auto draw()
     {
-      glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), m_tiles.capacity / sizeof(tile));
+      auto const tile_count_capacity = m_tiles.capacity / sizeof(tile);
+      auto const tile_count = std::min((size_t)this->tile_count, tile_count_capacity);
+      glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, (GLsizei)vertices.size(), (GLsizei)tile_count);
+      glCheckError();
     }
+
+  public: // public uniform data cache
+    GLuint tile_count = 0, chunk_len = 0xffffffffu, tileset_count = 0;
+    glm::mat4 projection = glm::ortho<float>(-1, 1, 1, -1);
 
   private:
     GLuint m_pid{};
     struct internal_uniform_locations
     {
-      GLint projection,
-          TILESETS,
-          tiles_use,
+      GLint TILESETS,
           tilesets_count,
+          projection,
           textures;
     } m_uniform{};
-    GLuint m_vao{}, m_chunks_attrib{}, m_chunk_len{};
+    std::unordered_map<utils::immutable_string, GLint> m_uniform_locations;
+
+    GLuint m_vao{}, m_chunks_attrib{};
     buffer m_vertices{}, m_tiles{}, m_chunks{}, m_tilesets{};
+
     std::vector<GLuint> m_textures;
     std::vector<std::string> m_texture_paths;
   };
+  static auto global_renderer = std::optional<renderer>{};
 }
 
 struct timer
@@ -655,8 +655,7 @@ struct timer
 };
 struct ticker
 {
-  double dt = 1.0 / 30.0;
-  double start_time = glfwGetTime();
+  double dt = 1.0 / 30.0, start_time = glfwGetTime();
   size_t tik = 0, max_ticks_per_frame = 4;
   bool next() { return tik < size_t((glfwGetTime() - start_time) / dt) ? ++tik : false; }
   auto skip() { start_time = glfwGetTime() - tik * dt; }
@@ -668,24 +667,17 @@ namespace lua
 {
   namespace helper
   {
-    static auto inline expect_arg_count(lua_State *L, int expected_argc) -> decltype(lua_gettop(L))
-    {
-      auto const argc = lua_gettop(L);
-      if (expected_argc == argc)
-        return argc;
-      luaL_error(L, "Too %s arguments. Expected:%d Got:%d",
-                 expected_argc < argc ? "many" : "few", expected_argc, argc);
-      [[unreachable]] throw;
-    }
-    template <auto event_name>
+    template <typename T, size_t N>
+    using CTS = ::utils::compile_time_array_wrapper<T, N>;
+    template <auto event_name> // CTS
     static auto constexpr event_window_forward(GLFWwindow *window, auto... args)
     {
-      static_assert(std::string_view{event_name.str}.substr(0, 3) == "on_",
-                    "event_name must start with \"on_\" prefix");
+      static_assert(std::string_view{event_name.arr, 3} == "on_",
+                    "event_name must start with \"on_\"");
       if (not L)
         return;
       auto const top = lua_gettop(L);
-      auto const name = event_name.str;
+      auto const ev_name = event_name.arr;
       auto const call = [&](char const *name)
       {
         auto argc = 0;
@@ -715,26 +707,35 @@ namespace lua
           (for_args(args), ...);
         }
         if (lua_pcall(L, argc, 0, 0) not_eq LUA_OK)
-          std::fprintf(stderr, "\033[31mLUA ERROR in `game.event.%s`: %s\n\033[0m", (name ? "on_event" : event_name.str), lua_tostring(L, -1)), lua_pop(L, 1);
+          std::fprintf(stderr, "\033[31mLUA ERROR in `game.event.%s`: %s\n\033[0m", (name ? "on_event" : ev_name), lua_tostring(L, -1)), lua_pop(L, 1);
       };
       if (lua_getglobal(L, "game") == LUA_TTABLE and
           lua_getfield(L, -1, "event") == LUA_TTABLE)
       {
-        if (lua_getfield(L, -1, name) == LUA_TFUNCTION)
+        if (lua_getfield(L, -1, ev_name) == LUA_TFUNCTION)
           call(nullptr);
         else
           lua_pop(L, 1);
         if (lua_getfield(L, -1, "on_event") == LUA_TFUNCTION)
-          call(name + sizeof("on"));
+          call(ev_name + sizeof("on"));
       }
       lua_settop(L, top);
+    }
+    static auto inline expect_arg_count(lua_State *L, int expected_argc) -> decltype(lua_gettop(L))
+    {
+      auto const argc = lua_gettop(L);
+      if (expected_argc == argc)
+        return argc;
+      luaL_error(L, "Too %s arguments. Expected:%d Got:%d",
+                 expected_argc < argc ? "many" : "few", expected_argc, argc);
+      [[unreachable]] throw;
     }
   }
   namespace game::event
   {
     static auto window_init /* */ (lua_State *L) -> int // fun()
     {
-      using utils::CTS, helper::event_window_forward;
+      using helper::event_window_forward, helper::CTS;
       if (L not_eq ::L)
         luaL_error(L, "Must be the global lua state. global:0x%p, provided:0x%p", static_cast<lua_State *>(::L), L);
       glfwSetWindowPosCallback /*          */ (window, event_window_forward<CTS("on_window_pos" /*           */)>);
@@ -817,7 +818,9 @@ namespace lua
     static auto camera /*       */ (lua_State *L) -> int // fun(left: number, right: number, bottom: number, top: number)
     {
       auto const argc = helper::expect_arg_count(L, 4);
-      render::projection = glm::ortho<float>(luaL_checknumber(L, 1), luaL_checknumber(L, 2), luaL_checknumber(L, 3), luaL_checknumber(L, 4));
+      render::tile::global_renderer->projection = glm::ortho<float>(
+          luaL_checknumber(L, 1), luaL_checknumber(L, 2),
+          luaL_checknumber(L, 3), luaL_checknumber(L, 4));
       return 0;
     }
     static auto tick_rate /*    */ (lua_State *L) -> int // fun(dt?: number): number
@@ -841,7 +844,11 @@ namespace lua
       try // switch to using exceptions and objects with raii
       {
         enum class type_t /* clang-format off */ {}; /* clang-format on */
-        auto image_paths = std::vector<std::string>{};
+        auto &renderer /*   */ = tile::global_renderer;
+        renderer->bind_vao();
+        renderer->use_program();
+        if (not renderer)
+          throw std::runtime_error("Global tile renderer required");
         auto static constexpr error = [](lua_State *L, char const *message)
         {
           char buf[256];
@@ -921,118 +928,122 @@ namespace lua
         };
         auto const map_tilewidth /*  */ = field("tilewidth"sv /*  */, 0u, true);
         auto const map_tileheight /* */ = field("tileheight"sv /* */, 0u, true);
-
-        field("tilesets"sv, (type_t)LUA_TTABLE, false);
-        { // pre-allocate vectors
-          auto const tilesets_len = luaL_len(L, -1);
-          tilesets.data.clear();
-          tilesets.data.reserve(tilesets_len);
-          image_paths.clear();
-          image_paths.reserve(tilesets_len);
-        }
-        for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (tileset in map.tilesets)
-        {
-          auto const firstgid /*   */ = field("firstgid"sv /*   */, 0u, true);
-          auto const tilecount /*  */ = field("tilecount"sv /*  */, 0u, true);
-          auto const columns /*    */ = field("columns"sv /*    */, 0u, true);
-          auto const tilewidth /*  */ = field("tilewidth"sv /*  */, 0u, true);
-          auto const tileheight /* */ = field("tileheight"sv /* */, 0u, true);
-          auto const image /*      */ = field("image"sv /*      */, "", true);
-          auto const tile_size /*  */ = vec2{tilewidth, tileheight} / vec2{map_tilewidth, map_tileheight};
-          auto const tile_offset /**/ = vec2{0.f, 1.f - tile_size.y};
-          auto const tex = [&]
+        { // Tilesets
+          auto image_paths /* */ = std::vector<std::string>{};
+          auto tilesets /*    */ = std::vector<render::tile::tileset>{};
+          field("tilesets"sv, (type_t)LUA_TTABLE, false);
+          { // pre-allocate vectors
+            auto const tilesets_len = luaL_len(L, -1);
+            tilesets.reserve(tilesets_len);
+            image_paths.reserve(tilesets_len);
+          }
+          for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (tileset in map.tilesets)
           {
-            auto tex = 0u;
-            for (; tex < image_paths.size(); tex++)
-              if (image_paths.at(tex) == image)
-                return tex;
-            image_paths.emplace_back(image);
-            return tex;
-          }();
-          tilesets.data.push_back(tileset{
-              .first /*       */ = firstgid,
-              .last /*        */ = firstgid + tilecount - 1,
-              .columns /*     */ = columns,
-              .rows /*        */ = tilecount / columns,
-              .tex /*         */ = tex,
-              .tile_offset /* */ = tile_offset,
-              .tile_size /*   */ = tile_size,
-          });
+            auto const firstgid /*   */ = field("firstgid"sv /*   */, 0u, true);
+            auto const tilecount /*  */ = field("tilecount"sv /*  */, 0u, true);
+            auto const columns /*    */ = field("columns"sv /*    */, 0u, true);
+            auto const tilewidth /*  */ = field("tilewidth"sv /*  */, 0u, true);
+            auto const tileheight /* */ = field("tileheight"sv /* */, 0u, true);
+            auto const image /*      */ = field("image"sv /*      */, "", true);
+            auto const size /*       */ = vec2{tilewidth, tileheight} / vec2{map_tilewidth, map_tileheight};
+            auto const offset /*     */ = vec2{0.f, 1.f - size.y};
+            auto const tex = [&]
+            {
+              auto tex = 0u;
+              for (; tex < image_paths.size(); tex++)
+                if (image_paths.at(tex) == image)
+                  return tex;
+              image_paths.emplace_back(image);
+              return tex;
+            }();
+            tilesets.push_back(render::tile::tileset{
+                .first /*   */ = firstgid,
+                .last /*    */ = firstgid + tilecount - 1,
+                .columns /* */ = columns,
+                .rows /*    */ = tilecount / columns,
+                .tex /*     */ = tex,
+                .offset /*  */ = offset,
+                .size /*    */ = size,
+            });
+          }
+          lua_pop(L, 2);
+          renderer->reload_textures(std::move(image_paths));
+          renderer->upload(tilesets);
         }
-        lua_pop(L, 2);
-        textures_load(std::move(image_paths));
-        tilesets.upload();
-
-        field("layers", (type_t)LUA_TTABLE, false);
-        { // pre-allocate vectors *and* verify `len(layer[i].chunks[j].data)` uniformity
-          auto expected_data_len = 0u;
-          auto tiles_allocate_reserve = size_t{0};
-          auto chunks_allocate_reserve = size_t{0};
+        { // Layers
+          auto chunks /* */ = std::vector<render::tile::chunk>{};
+          auto tiles /*  */ = std::vector<render::tile::tile>{};
+          field("layers", (type_t)LUA_TTABLE, false);
+          { // pre-allocate vectors *and* verify `len(layer[i].chunks[j].data)` uniformity
+            auto expected_data_len = 0u;
+            auto tiles_allocate_reserve = size_t{0};
+            auto chunks_allocate_reserve = size_t{0};
+            for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (layer in map.layers)
+            {
+              auto const layer_type = field("type", "", true);
+              if (layer_type not_eq "tilelayer"sv)
+                continue;
+              field("chunks", (type_t)LUA_TTABLE, false);
+              auto const chunks_len = luaL_len(L, -1);
+              chunks_allocate_reserve += chunks_len;
+              for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (chunk in map.layers[i].chunks)
+              {
+                auto const chunk_width /*  */ = field("width" /*  */, 0u, true);
+                auto const chunk_height /* */ = field("height" /* */, 0u, true);
+                auto const chunk_wh /*     */ = chunk_width * chunk_height;
+                if (expected_data_len == 0u)
+                  expected_data_len = chunk_wh;
+                if (expected_data_len not_eq chunk_wh)
+                  error(L, "had an irregular width * height");
+                field("data", (type_t)LUA_TTABLE, false);
+                auto const data_len = luaL_len(L, -1);
+                if (expected_data_len not_eq data_len)
+                  error(L, "had an irregular length");
+                tiles_allocate_reserve += data_len;
+                lua_pop(L, 2);
+              }
+              lua_pop(L, 2);
+            }
+            tiles.reserve(tiles_allocate_reserve);
+            chunks.reserve(chunks_allocate_reserve);
+            renderer->chunk_len = expected_data_len;
+          }
           for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (layer in map.layers)
           {
             auto const layer_type = field("type", "", true);
             if (layer_type not_eq "tilelayer"sv)
               continue;
             field("chunks", (type_t)LUA_TTABLE, false);
-            auto const chunks_len = luaL_len(L, -1);
-            chunks_allocate_reserve += chunks_len;
             for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (chunk in map.layers[i].chunks)
             {
+              auto const chunk_x /*      */ = field("x" /*      */, 0u, true);
+              auto const chunk_y /*      */ = field("y" /*      */, 0u, true);
               auto const chunk_width /*  */ = field("width" /*  */, 0u, true);
               auto const chunk_height /* */ = field("height" /* */, 0u, true);
-              auto const chunk_wh /*     */ = chunk_width * chunk_height;
-              if (expected_data_len == 0u)
-                expected_data_len = chunk_wh;
-              if (expected_data_len not_eq chunk_wh)
-                error(L, "had an irregular width * height");
+
+              chunks.push_back(render::tile::chunk{
+                  .pos /*  */ {chunk_x, chunk_y},
+                  .size /* */ {chunk_width, chunk_height},
+              });
+
               field("data", (type_t)LUA_TTABLE, false);
-              auto const data_len = luaL_len(L, -1);
-              if (expected_data_len not_eq data_len)
-                error(L, "had an irregular length");
-              tiles_allocate_reserve += data_len;
+              for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (tile in map.layers[i].chunks[j].data)
+              {
+                auto isnum = 0;
+                auto tile = lua_tointegerx(L, -1, &isnum);
+                if (not isnum)
+                  error(L, "was not an integer");
+                tiles.push_back((uint)tile);
+              }
               lua_pop(L, 2);
             }
             lua_pop(L, 2);
           }
-          tiles.data.clear();
-          tiles.data.reserve(tiles_allocate_reserve);
-          tiles_chunks.data.clear();
-          tiles_chunks.data.reserve(chunks_allocate_reserve);
-        }
-        for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (layer in map.layers)
-        {
-          auto const layer_type = field("type", "", true);
-          if (layer_type not_eq "tilelayer"sv)
-            continue;
-          field("chunks", (type_t)LUA_TTABLE, false);
-          for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (chunk in map.layers[i].chunks)
-          {
-            auto const chunk_x /*      */ = field("x" /*      */, 0u, true);
-            auto const chunk_y /*      */ = field("y" /*      */, 0u, true);
-            auto const chunk_width /*  */ = field("width" /*  */, 0u, true);
-            auto const chunk_height /* */ = field("height" /* */, 0u, true);
-
-            tiles_chunks.data.push_back(tiles_chunk{
-                .pos /*  */ {chunk_x, chunk_y},
-                .size /* */ {chunk_width, chunk_height},
-            });
-
-            field("data", (type_t)LUA_TTABLE, false);
-            for (lua_pushnil(L); lua_next(L, -2); lua_pop(L, 1)) // for (tile in map.layers[i].chunks[j].data)
-            {
-              auto isnum = 0;
-              auto tile = lua_tointegerx(L, -1, &isnum);
-              if (not isnum)
-                error(L, "was not an integer");
-              tiles.data.push_back((uint)tile);
-            }
-            lua_pop(L, 2);
-          }
           lua_pop(L, 2);
+          renderer->upload(chunks);
+          renderer->upload(tiles);
+          renderer->tile_count = (GLsizei)tiles.size();
         }
-        lua_pop(L, 2);
-        tiles_chunks.upload();
-        tiles.upload();
 
         lua_settop(L, argc);
         return 0;
@@ -1050,7 +1061,7 @@ namespace lua
       helper::expect_arg_count(L, 0);
       try
       {
-        render::tiles_draw();
+        render::tile::global_renderer->draw();
         return 0;
       }
       catch (std::exception const &e)
@@ -1093,9 +1104,10 @@ static inline void setup()
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glClearColor(0.1, 0.1, 0.1, 0.1);
 
-  render::vao_init();
-  render::pid_init(utils::file_read_all("res/shaders/vert.glsl"),
-                   utils::file_read_all("res/shaders/frag.glsl"));
+  auto &renderer = render::tile::global_renderer.emplace();
+  renderer.reload_vao();
+  renderer.reload_program(utils::file_read_all("res/shaders/vert.glsl"),
+                          utils::file_read_all("res/shaders/frag.glsl"));
 
   lua::init();
   if (auto code = "package.path = './res/scripts/?.lua;' .. package.path"; luaL_dostring(L, code) not_eq LUA_OK)
@@ -1112,10 +1124,11 @@ static inline void setup()
 }
 static inline void update(double dt)
 {
-  if (auto constexpr reload_files = 1)
+  if (auto constexpr reload_files = 0)
   {
-    render::pid_init(utils::file_read_all("res/shaders/vert.glsl"),
-                     utils::file_read_all("res/shaders/frag.glsl"));
+    if (auto &renderer = render::tile::global_renderer)
+      renderer->reload_program(utils::file_read_all("res/shaders/vert.glsl"),
+                               utils::file_read_all("res/shaders/frag.glsl"));
     if (auto path = "res/scripts/main.lua"; luaL_dofile(L, path) not_eq LUA_OK)
       std::fprintf(stderr, "\033[31mLua Error: %s\n\033[0m", lua_tolstring(L, -1, 0));
     lua_settop(L, 0);
@@ -1129,19 +1142,12 @@ static inline void update(double dt)
 }
 static inline void draw()
 {
-  using namespace render;
   glClear(GL_COLOR_BUFFER_BIT);
 
-  glUseProgram(pid);
-  glBindVertexArray(vao);
+  auto &renderer = render::tile::global_renderer;
 
-  for (auto i = 0; i < textures.size(); i++)
-  {
-    glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, textures.at(i));
-  }
-
-  glUniformMatrix4fv(uniform.projection, 1, GL_FALSE, &projection[0][0]);
+  renderer->prep_draw();
+  renderer->update_uniforms();
 
   if (auto static constexpr global = "game", name = "draw", param = "";
       lua_getglobal(L, global) == LUA_TTABLE and lua_getfield(L, -1, name) == LUA_TFUNCTION and
@@ -1175,7 +1181,7 @@ static inline void loop()
   auto const after_frm = now();
   auto const after_ttl = now();
 
-  if (auto constexpr print_frame_timings = 0)
+  if (auto constexpr print_frame_timings = 1)
   {
     auto const evt_duration = duration(after_evt - before_evt).count();
     auto const upd_duration = duration(after_upd - before_upd).count();
@@ -1209,14 +1215,7 @@ static inline void shutdown()
     std::fprintf(stderr, "\033[31mLua Error in %s.%s(%s): %s\n\033[0m", global, name, param, lua_tolstring(L, -1, 0)), lua_pop(L, 1);
   lua_settop(L, 0);
   L = {};
-
-  using namespace render;
-  glDeleteVertexArrays(1, &vao);
-  glDeleteBuffers((GLsizei)vbos.size(), vbos.data());
-  glDeleteShader(vid);
-  glDeleteShader(fid);
-  glDeleteProgram(pid);
-  glDeleteTextures((GLsizei)textures.size(), textures.data());
+  render::tile::global_renderer = {};
 }
 
 int main()

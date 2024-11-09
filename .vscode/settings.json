@@ -38,6 +38,7 @@
     "Overworld",
     "Parameteri",
     "pcall",
+    "pcallk",
     "Programiv",
     "pushcclosure",
     "pushfstring",
@@ -152,7 +153,8 @@
     "xtr1common": "cpp",
     "xtree": "cpp",
     "xutility": "cpp",
-    "coroutine": "cpp"
+    "coroutine": "cpp",
+    "expected": "cpp"
   },
   "Lua.workspace.library": ["./src"],
   "Lua.diagnostics.globals": ["game"],
