@@ -1,7 +1,7 @@
 ---@meta
+---@alias game.event.name "window_pos" | "window_size" | "window_close" | "window_refresh" | "window_focus" | "window_iconify" | "window_maximize" | "framebuffer_size" | "window_content_scale" | "key" | "char" | "char_mods" | "mouse_button" | "cursor_pos" | "cursor_enter" | "scroll" | "drop"
 ---@class game.event
----@field on_event                nil | fun(name: string, ...)
----@field window_init             fun()
+---@field on_event                nil | fun(name: game.event.name, ...)
 ---@field on_window_pos           nil | fun(xpos: integer, ypos: integer)
 ---@field on_window_size          nil | fun(width: integer, height: integer)
 ---@field on_window_close         nil | fun()

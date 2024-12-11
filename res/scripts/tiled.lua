@@ -98,7 +98,7 @@
 ---@field visible    true
 ---@field properties table
 
-tiled = tiled or {}
+local tiled = {}
 
 tiled.map = {
   maps_path_fmt = "res/maps/%s.tmx.lua",
@@ -137,4 +137,4 @@ function tiled.map.load(name)
   return map;
 end
 
-return tiled.map
+return tiled

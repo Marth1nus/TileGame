@@ -1,5 +1,4 @@
 ---@meta
-
 ---@class game.input
 game.input = {}
 
@@ -9,7 +8,6 @@ game.input.action = {
   PRESS   = 1,
   REPEAT  = 2,
 }
-
 ---@enum game.input.key
 game.input.key = {
   UNKNOWN       = -1,
@@ -135,7 +133,6 @@ game.input.key = {
   MENU          = 348,
   LAST          = 348,
 }
-
 ---@enum game.input.mouse_button
 game.input.mouse_button = {
   ['1']  = 0,
@@ -151,5 +148,5 @@ game.input.mouse_button = {
   RIGHT  = 1,
   MIDDLE = 2,
 }
-
+---@alias game.input.mb game.input.mouse_button
 game.input.mb = game.input.mouse_button

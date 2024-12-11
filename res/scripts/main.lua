@@ -1,109 +1,85 @@
-game.map = require("tiled.map")
+print("reload main.lua")
+tiled = require("tiled")
 
-game.state = game.state or {
-  view_width = 16,
-  aspect     = 1,
-  ---@type vec2
-  camera_pos = { 0, 0 },
-}
+function table_reverse(t)
+  local r = {}
+  for k, v in pairs(t) do r[v] = k end
+  return r
+end
 
-utils = {
-  ---@param value any
-  ---@param indent? string
-  ---@return string
-  tostring = function(value, indent)
-    if type(value) ~= "table" then
-      return tostring(value)
-    end
-    local res = "\n"
-    indent = indent or ""
-    local indent_p = indent .. "\t"
-    for k, v in pairs(value) do
-      res = string.format("%s%s%-16s = %s,\n", res, indent_p, tostring(k), utils.tostring(v, indent_p))
-    end
-    return string.format("{%s%s}", res, indent)
-  end,
-  ---@param value any
-  print = function(value)
-    print(utils.tostring(value))
-  end,
-}
-
-on_key_press = {
-  [game.input.key.DELETE] = function() print("\027[2J\027[H") end,
-  [game.input.key.INSERT] = function() game.prep_tilemap(game.map.load("main")) end,
-}
-
+---@type {[game.input.key]: string}
+key_name = key_name or table_reverse(game.input.key)
+---@type {[game.input.key | string]: fun()}
+on_key = on_key or {}
+---@type {[game.input.key | string]: true|nil}
 key_down = key_down or {}
-function game.event.on_key(key, _, action)
-  if not key_down_reverse then
-    local reverse = {}
-    for key, value in pairs(game.input.key) do
-      reverse[value] = key;
-    end
-    key_down_reverse = reverse
-  end
-  local char = key_down_reverse[key]
-  key_down[key] = action ~= game.input.action.RELEASE or nil
-  key_down[char] = key_down[key]
-  print("Key", char, key)
-  if action == game.input.action.PRESS then
-    local f = on_key_press[key]
-    if f then f() end
-  end
-end
 
+---@type {[game.input.mb]: string}
+mb_name = mb_name or table_reverse(game.input.mb)
+---@type {[game.input.mb | string]: fun()}
+on_mb = on_mb or {}
+---@type {[game.input.mb | string]: true|nil}
 mb_down = mb_down or {}
-function game.event.on_mouse_button(button, action, _)
-  mb_down[button] = action ~= game.input.action.RELEASE or nil
+
+state = state or {
+  view_width = 4,
+  ---@type vec2
+  view_offset = { 0, 0 },
+}
+
+function update_view()
+  local x, y = table.unpack(state.view_offset)
+  local w, h = state.view_width, state.view_width
+  game.set_camera_ortho(x - w, x + w, y + h, y - h)
 end
 
-function game.event.on_scroll(dx, dy)
-  if mb_down[game.input.mb['5']] then
-    game.state.view_width = game.state.view_width - math.ceil(dy)
-    game.state.update_view()
-    return
-  end
-  local cx, cy = table.unpack(game.state.camera_pos)
-  cx = cx - dx
-  cy = cy - dy
-  game.state.camera_pos = { cx, cy };
-  game.state.update_view()
-end
-
-function game.event.on_window_size(w, h)
-  game.viewport(0, 0, w, h)
-  game.state.aspect = w / h
-  game.state.update_view()
-end
-
-function game.state.update_view()
-  local a, s = game.state.aspect, game.state.view_width
-  local w, h = s * a, s / a
-  local x, y = table.unpack(game.state.camera_pos)
-  game.camera(x - w, x + w, y - h, y + h);
+function reload()
+  dofile("res/scripts/main.lua")
+  game.load_map(tiled.map.load("main"))
 end
 
 function game.setup()
   print("setup")
-  game.event.on_window_size(720, 720)
-  game.prep_tilemap(game.map.load("main"))
-  game.tick_rate(1.0 / 30.0);
+  reload()
 end
 
 function game.update(dt)
-  local s = 10 / 30;
-  local cx, cy = table.unpack(game.state.camera_pos)
-  cy = cy + (key_down.W and -s or 0) + (key_down.S and s or 0)
-  cx = cx + (key_down.A and -s or 0) + (key_down.D and s or 0)
-  game.state.camera_pos = { cx, cy };
-  game.state.update_view()
-end
-
-function game.draw()
-  game.draw_tiles()
+  update_view()
 end
 
 function game.shutdown()
   print("shutdown")
+end
+
+function game.event.on_scroll(xoffset, yoffset)
+  if mb_down[4] then
+    state.view_width = state.view_width - yoffset
+  else
+    local x, y = table.unpack(state.view_offset)
+    x, y = x - xoffset, y - yoffset
+    state.view_offset = { x, y }
+  end
+end
+
+function game.event.on_key(key, scancode, action, mods)
+  local chr = key_name[key]
+  local press = action ~= game.input.action.RELEASE and true or nil
+  if press then
+    if on_key[key] then on_key[key]() end
+    if on_key[chr] then on_key[chr]() end
+  end
+  key_down[key], key_down[chr] = press, press
+end
+
+function game.event.on_mouse_button(button, action, mods)
+  local but = button
+  local press = action ~= game.input.action.RELEASE and true or nil
+  if press then
+    if on_mb[but] then on_mb[but]() end
+  end
+  mb_down[but] = press
+end
+
+function on_key.F5()
+  reload()
 end

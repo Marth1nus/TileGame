@@ -2,13 +2,9 @@
 ---@alias  vec2 [number , number ]
 ---@alias ivec2 [integer, integer]
 ---@class game
----@field setup        nil | fun()
----@field update       nil | fun(dt: number)
----@field draw         nil | fun()
----@field shutdown     nil | fun()
----@field viewport     fun(x: integer, y: integer, width: integer, height: integer)
----@field camera       fun(left: number, right: number, bottom: number, top: number)
----@field tick_rate    fun(dt?: number): number
----@field prep_tilemap fun(map: tiled.map)
----@field draw_tiles   fun()
+---@field setup    nil | fun()
+---@field update   nil | fun(dt: number)
+---@field shutdown nil | fun()
+---@field set_camera_ortho fun(left: number, right: number, bottom: number, top: number)
+---@field load_map         fun(map: tiled.map)
 game = {}

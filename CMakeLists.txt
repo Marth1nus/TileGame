@@ -10,11 +10,18 @@ FetchContent_Declare(glm       GIT_REPOSITORY https://github.com/g-truc/glm     
 FetchContent_Declare(entt      GIT_REPOSITORY https://github.com/skypjack/entt       GIT_TAG master )
 FetchContent_Declare(box2d     GIT_REPOSITORY https://github.com/erincatto/box2d     GIT_TAG main   )
 FetchContent_MakeAvailable(lua-cmake glm entt box2d)
-
 add_subdirectory(vendor/stb)
 
 add_executable(${PROJECT_NAME} 
+  src/application.cpp
+  src/application.hpp
+  src/common.cpp
+  src/common.hpp
   src/main.cpp
+  src/render.cpp
+  src/render.hpp
+  src/script.cpp
+  src/script.hpp
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm EnTT::EnTT box2d stb)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_23)
