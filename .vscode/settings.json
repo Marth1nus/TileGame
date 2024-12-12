@@ -25,6 +25,7 @@
     "gles",
     "GLFW",
     "glsl",
+    "highp",
     "iconified",
     "Iconify",
     "imageheight",

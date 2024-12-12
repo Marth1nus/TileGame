@@ -12,7 +12,7 @@ struct tileset
   uint tex, columns, rows, padding;
   vec4 quad;
 };
-uniform TILESETS { tileset tilesets[TEXTURE_SLOTS]; };
+uniform TILESETS { tileset tilesets[4]; };
 uniform uint tileset_count;
 uniform mat4 projection;
 

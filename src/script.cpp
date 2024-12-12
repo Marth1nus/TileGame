@@ -81,7 +81,6 @@ namespace game::script::lua
       glfwSetWindowContentScaleCallback /* */ (window, forward_window_event<CTA{"on_window_content_scale" /* */}>);
       glfwSetKeyCallback /*                */ (window, forward_window_event<CTA{"on_key" /*                  */}>);
       glfwSetCharCallback /*               */ (window, forward_window_event<CTA{"on_char" /*                 */}>);
-      glfwSetCharModsCallback /*           */ (window, forward_window_event<CTA{"on_char_mods" /*            */}>);
       glfwSetMouseButtonCallback /*        */ (window, forward_window_event<CTA{"on_mouse_button" /*         */}>);
       glfwSetCursorPosCallback /*          */ (window, forward_window_event<CTA{"on_cursor_pos" /*           */}>);
       glfwSetCursorEnterCallback /*        */ (window, forward_window_event<CTA{"on_cursor_enter" /*         */}>);
@@ -230,6 +229,7 @@ namespace game::script::lua
         return luaL_error(L, "Global Application Missing");
       auto const projection = glm::ortho<float>(left, right, bottom, top);
       global_application->get_renderer()->set_projection(projection);
+      return 0;
     }
     auto load_map(lua_State *L) -> int // fun(map: tiled.map)
     {

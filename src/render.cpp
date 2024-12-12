@@ -1,22 +1,32 @@
 #include "render.hpp"
 #include <stb_image.h>
 
+#if defined(USE_GLAD)
+#include <glad/gles2.h>
+#else // defined(USE_GLAD)
+#include <GLES3/gl3.h>
+#endif // defined(USE_GLAD)
+
 namespace game::render
 {
-  auto glCheckError() -> void
+  auto static glErrorName(GLenum err) -> char const *
   {
-    for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
+    switch (err)
     {
-      auto str = /* clang-format off */ [err]{ switch (err) {
-          case GL_INVALID_ENUM:                  return "GL_INVALID_ENUM";
-          case GL_INVALID_VALUE:                 return "GL_INVALID_VALUE";
-          case GL_INVALID_OPERATION:             return "GL_INVALID_OPERATION";
-          case GL_OUT_OF_MEMORY:                 return "GL_OUT_OF_MEMORY";
-          case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
-          default:                               return "UNKNOWN_ERROR"; } }(); /* clang-format on */
-      utils::print_errorf("GLES Error 0x%x %s", err, str);
+    /* clang-format off */ case GL_INVALID_ENUM:                  return "INVALID_ENUM";                  /* clang-format on */
+    /* clang-format off */ case GL_INVALID_VALUE:                 return "INVALID_VALUE";                 /* clang-format on */
+    /* clang-format off */ case GL_INVALID_OPERATION:             return "INVALID_OPERATION";             /* clang-format on */
+    /* clang-format off */ case GL_OUT_OF_MEMORY:                 return "OUT_OF_MEMORY";                 /* clang-format on */
+    /* clang-format off */ case GL_INVALID_FRAMEBUFFER_OPERATION: return "INVALID_FRAMEBUFFER_OPERATION"; /* clang-format on */
+    /* clang-format off */ default:                               return "UNKNOWN_ERROR";                 /* clang-format on */
     }
   }
+  auto inline glCheckError(int line) -> void
+  {
+    for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
+      utils::print_errorf("GLES Error 0x%3x %32s --- on line %4d in file %s", err, glErrorName(err), line, __FILE__);
+  }
+#define glCheckError() glCheckError(__LINE__)
   auto make_shader(GLenum type, std::string_view glsl, std::string_view common) noexcept -> GLuint
   {
     auto const error = [&](char const *msg) -> GLuint
@@ -79,9 +89,13 @@ namespace game::render
   auto make_program(std::string_view vert, std::string_view frag, program_defines defines) -> make_program_result
   {
     auto static constexpr &fmt = "#define TEXTURE_SLOTS %3du\n"
+                                 "#define TILESETS_SIZE %3du\n"
                                  "#define WEBGL         %3d \n";
     char buf[std::size(fmt)];
-    auto [common, alloc] = utils::snprintf(buf, fmt, defines.texture_slots, defines.webgl);
+#if defined(__EMSCRIPTEN__)
+    defines.webgl = true;
+#endif // defined(__EMSCRIPTEN__)
+    auto [common, alloc] = utils::snprintf(buf, fmt, defines.texture_slots, defines.tilesets_size, defines.webgl);
     return make_program(vert, frag, common);
   }
 }

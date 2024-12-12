@@ -2,17 +2,19 @@
 #define RENDER_HPP
 
 #include "common.hpp"
-#include <glad/gles2.h>
 
 namespace game::render
 {
+  using GLint = int;
+  using GLuint = int unsigned;
+  using GLenum = int;
   struct make_program_result
   {
     GLuint pid, vid, fid;
   };
   struct program_defines
   {
-    int texture_slots, webgl : 1 = 0;
+    int texture_slots, tilesets_size, webgl = 0;
   };
   auto glCheckError() -> void;
   auto make_shader(GLenum type, std::string_view glsl, std::string_view common) noexcept -> GLuint;

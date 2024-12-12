@@ -3,6 +3,18 @@
 #include <lua.hpp>
 #include <GLFW/glfw3.h>
 
+#if defined(USE_GLAD)
+#include <glad/gles2.h>
+#else // defined(USE_GLAD)
+#include <GLES3/gl3.h>
+#endif // defined(USE_GLAD)
+#if defined(__EMSCRIPTEN__)
+#define EMCC 1
+#include <emscripten.h>
+#else
+#define EMCC 0
+#endif // defined(__EMSCRIPTEN__)
+
 namespace game
 {
   application::application()
@@ -20,7 +32,9 @@ namespace game
       auto const window = utils::assertf(glfwCreateWindow(width, height, title, 0, 0), "%s init fail", "window");
       m_window = {window, glfwDestroyWindow};
       glfwMakeContextCurrent(window);
+#if defined(USE_GLAD)
       utils::assertf(gladLoadGLES2(glfwGetProcAddress), "%s init fail", "glad");
+#endif // defined(USE_GLAD)
       glViewport(0, 0, width, height);
     }
     { // Renderer
@@ -60,8 +74,17 @@ namespace game
   {
     m_update_start = glfwGetTime();
     m_update_tik = 0;
+#if defined(__EMSCRIPTEN__)
+    auto static constexpr emscripten_main_loop = []
+    {
+      if (not global_application->loop())
+        emscripten_cancel_main_loop();
+    };
+    emscripten_set_main_loop(emscripten_main_loop, 0, true);
+#else  // defined(__EMSCRIPTEN__)
     while (loop())
       ;
+#endif // defined(__EMSCRIPTEN__)
   }
   auto application::loop() -> bool
   {
@@ -91,7 +114,7 @@ namespace game
       draw();
     }
     auto const drw_stop = now();
-    if constexpr (auto constexpr display_time_widget = 1)
+    if constexpr (auto constexpr display_time_widget = 1 and not EMCC)
     {
       auto static constinit count = 120.0,
                             evt_ave = 0.0,

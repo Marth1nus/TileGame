@@ -1,6 +1,6 @@
 #define TEXTURE_SLOTS 16u
 #define WEBGL          0
-// Evereything before here is ignored (defines added back at pre-compile-time)
+// Everything before here is ignored (defines added back at pre-compile-time)
 #version 300 es
 
 precision highp float;
@@ -18,10 +18,7 @@ out vec4 color;
 vec4 get_texture_color(uint tex, vec2 uv)
 {
 #if WEBGL
-  for (uint i = 0u; i < TEXTURE_SLOTS; i++)
-    if (i == tex)
-      return texture(textures[i], uv); 
-  return texture(textures[0], uv); 
+  switch (int(tex)){ case 0: return texture(textures[0], uv);case 1: return texture(textures[1], uv);case 2: return texture(textures[2], uv);case 3: return texture(textures[3], uv);case 4: return texture(textures[4], uv);case 5: return texture(textures[5], uv);case 6: return texture(textures[6], uv);case 7: return texture(textures[7], uv);case 8: return texture(textures[8], uv);case 9: return texture(textures[9], uv);case 10: return texture(textures[10], uv);case 11: return texture(textures[11], uv);case 12: return texture(textures[12], uv);case 13: return texture(textures[13], uv);case 14: return texture(textures[14], uv);case 15: return texture(textures[15], uv); default: return texture(textures[0], uv); }
 #else
   return texture(textures[tex], uv);
 #endif

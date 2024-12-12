@@ -1,5 +1,16 @@
 #include "common.hpp"
 
+auto game::utils::file_read_all(char const *path) -> std::string
+{
+  auto res = std::string{};
+  auto file = std::fopen(path, "r");
+  if (not file)
+    return res;
+  res.resize((size_t)(std::fseek(file, 0, SEEK_END), std::ftell(file)));
+  res.resize((size_t)(std::fseek(file, 0, SEEK_SET), std::fread(res.data(), sizeof(res[0]), res.size(), file)));
+  std::fclose(file);
+  return res;
+}
 auto game::utils::vsnprintf(std::span<char> buf, char const *fmt, va_list args) -> snprintf_result
 {
   auto msg = buf.data();
@@ -29,23 +40,16 @@ printf_fmt_check(2, 3) auto game::utils::snprintf(std::span<char> buf, printf_fm
 }
 printf_fmt_check(1, 2) auto game::utils::print_errorf(printf_fmt_arg_check char const *fmt, ...) -> int
 {
+#if defined(__EMSCRIPTEN__)
+  auto fmt_ex = std::string_view{fmt};
+#else  // defined(__EMSCRIPTEN__)
   char buf[0x100];
   auto [fmt_ex, alloc] = snprintf(buf, "\033[31m%s\033[0m\n", fmt);
+#endif // defined(__EMSCRIPTEN__)
   va_list args;
   va_start(args, fmt);
   auto res = std::vfprintf(stderr, fmt_ex.data(), args);
   va_end(args);
   print_error_breakpoint();
-  return res;
-}
-auto game::utils::file_read_all(char const *path) -> std::string
-{
-  auto res = std::string{};
-  auto file = std::fopen(path, "r");
-  if (not file)
-    return res;
-  res.resize((size_t)(std::fseek(file, 0, SEEK_END), std::ftell(file)));
-  res.resize((size_t)(std::fseek(file, 0, SEEK_SET), std::fread(res.data(), sizeof(res[0]), res.size(), file)));
-  std::fclose(file);
   return res;
 }

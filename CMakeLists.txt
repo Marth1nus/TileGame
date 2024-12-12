@@ -7,9 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 FetchContent_Declare(lua-cmake GIT_REPOSITORY https://github.com/Marth1nus/lua-cmake GIT_TAG master )
 FetchContent_Declare(glm       GIT_REPOSITORY https://github.com/g-truc/glm          GIT_TAG master )
-FetchContent_Declare(entt      GIT_REPOSITORY https://github.com/skypjack/entt       GIT_TAG master )
-FetchContent_Declare(box2d     GIT_REPOSITORY https://github.com/erincatto/box2d     GIT_TAG main   )
-FetchContent_MakeAvailable(lua-cmake glm entt box2d)
+FetchContent_MakeAvailable(lua-cmake glm)
 add_subdirectory(vendor/stb)
 
 add_executable(${PROJECT_NAME} 
@@ -23,7 +21,7 @@ add_executable(${PROJECT_NAME}
   src/script.cpp
   src/script.hpp
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm EnTT::EnTT box2d stb)
+target_link_libraries(${PROJECT_NAME} PRIVATE lua glm::glm stb)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_23)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
@@ -43,7 +41,11 @@ else()
   set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(glfw)
-  add_subdirectory(vendor/glad)
-  target_link_libraries(${PROJECT_NAME} PRIVATE glfw glad)
+  target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+  if (WIN32)
+    add_definitions(-DUSE_GLAD)
+    add_subdirectory(vendor/glad)
+    target_link_libraries(${PROJECT_NAME} PRIVATE glad)
+  endif()
 
 endif()
