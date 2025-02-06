@@ -419,6 +419,8 @@ namespace game
       shutdown();
       return 0;
     }
+
+  private:
     auto setup() -> void
     {
       glEnable(GL_BLEND);
@@ -487,12 +489,11 @@ namespace game
       glfwGetCursorPos(m_window.get(), &mx, &my);
       auto ww = 0, wh = ww;
       glfwGetWindowSize(m_window.get(), &ww, &wh);
-      auto p = glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f;
-      p = glm::clamp(p, {-16, -16}, {11, 11});
-      auto static pp = p;
-      pp += (p - pp) * 0.1f;
-      pp *= 0.999f;
-      m_tile_meshes.at(0).update(std::array{glm::vec3{pp, 0}});
+      auto p = glm::clamp(glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f, {-16, -16}, {11, 11});
+      auto static p0 = p, p1 = p;
+      p0 = 0.999f * (p0 + (p - p0) * 0.10f);
+      p1 = 0.999f * (p1 + (p - p1) * 0.01f);
+      m_tile_meshes.at(0).update(std::array{glm::vec3{p0, 0}, glm::vec3{p1, 0}});
     }
     auto render() -> void
     {
