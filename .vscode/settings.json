@@ -7,6 +7,7 @@
     "GLES",
     "glfw",
     "highp",
+    "imgui",
     "Integerv",
     "Lsizei",
     "mpos",
@@ -93,6 +94,11 @@
     "unordered_set": "cpp",
     "xtree": "cpp",
     "ranges": "cpp",
-    "stb_image_write.h": "c"
+    "stb_image_write.h": "c",
+    "cfenv": "cpp",
+    "coroutine": "cpp",
+    "stacktrace": "cpp",
+    "stop_token": "cpp",
+    "thread": "cpp"
   }
 }
