@@ -17,14 +17,14 @@ namespace game
     application();
     ~application();
     auto run() -> int;
-    
+
   private:
     auto setup() -> void;
     auto events() -> bool;
     auto update() -> void;
     auto render() -> void;
     auto shutdown() -> void;
-    
+
   private:
     std::shared_ptr<GLFWwindow> m_window;
 
@@ -34,7 +34,7 @@ namespace game
     b2WorldId m_world_id = b2_nullWorldId;
     std::vector<b2BodyId> m_bodies;
 
-    double m_time_update_stamp = 0, m_dt = 1.0 / 60.0;
+    double m_time_update_stamp = 0, m_dt = 1.0 / 30.0;
     bool m_running : 1;
   };
 }

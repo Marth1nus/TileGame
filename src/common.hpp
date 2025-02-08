@@ -53,35 +53,22 @@ namespace game::utils
     std::string_view msg;
     std::unique_ptr<char[]> alloc = {};
   };
-  auto snprintf(std::span<char> buf, MSVC_FMT_STR char const *fmt, ...) -> snprintf_result GNU_FORMAT_ATTRIB(2, 3);
+  GNU_FORMAT_ATTRIB(2, 3)
+  auto snprintf(std::span<char> buf, MSVC_FMT_STR char const *fmt, ...) -> snprintf_result;
+  GNU_FORMAT_ATTRIB(1, 2)
+  auto errorf(MSVC_FMT_STR char const *fmt, ...) -> void;
   auto read_all(char const *filepath, char const *mode = "r") -> std::string;
-  auto static inline assertf(auto &&value, MSVC_FMT_STR char const *fmt, auto... args) -> decltype(value) GNU_FORMAT_ATTRIB(2, 3)
+  auto static inline assertf(auto &&value, char const *fmt, auto... args) -> decltype(value)
+    requires(sizeof...(args) > 0)
   {
     if (value)
       return std::forward<decltype(value)>(value);
-    if constexpr (not sizeof...(args))
-      throw failed_assert{fmt};
     else
     {
       char buf[0x100];
       auto [msg, alloc] = snprintf(buf, fmt, args...);
       throw failed_assert{msg.data()};
     }
-  }
-  auto static inline errorf(MSVC_FMT_STR char const *fmt, auto... args) -> void GNU_FORMAT_ATTRIB(1, 2)
-  {
-#if defined(__EMSCRIPTEN__)
-    auto msg = fmt;
-#else  // defined(__EMSCRIPTEN__)
-    char buf[0x100];
-    auto [msg_sv, alloc] = snprintf(buf, "\033[31m%s\033[0m\n", fmt);
-    auto msg = msg_sv.data();
-#endif // defined(__EMSCRIPTEN__)
-    if constexpr (sizeof...(args))
-      std::fprintf(stderr, msg, args...);
-    else
-      std::fprintf(stderr, "%s", msg);
-    error_breakpoint();
   }
 }
 

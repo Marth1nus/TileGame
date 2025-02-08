@@ -87,7 +87,7 @@ namespace game
           stbi_load("res/rpg-asset-pack/3x/RPG tileset (full) v1.7 - 300%.png",
                     &width, &height, &channels, channels),
           stbi_image_free};
-      utils::assertf(pixels, "failed to load tile atlas image");
+      utils::assertf(pixels, "%s", "failed to load tile atlas image");
       auto tile_pixels_size = glm::uvec2{48, 48};
       auto atlas_tiles_size = glm::uvec3{glm::uvec2{width, height} / tile_pixels_size, 1};
       auto atlas_pixels_size = atlas_tiles_size * glm::uvec3{tile_pixels_size, 1};
@@ -189,9 +189,9 @@ namespace game
       glfwGetWindowSize(m_window.get(), &ww, &wh);
       auto p = glm::clamp(glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f, {-16, -16}, {11, 11});
       auto static p0 = p, p1 = p, p2 = p;
-      p0 += (p - p0) * 0.08f;
-      p1 += (p - p1) * 0.04f;
-      p2 += (p - p2) * 0.06f;
+      p0 += (p - p0) * 0.08f * (float)m_dt * (float)60;
+      p1 += (p - p1) * 0.04f * (float)m_dt * (float)60;
+      p2 += (p - p2) * 0.06f * (float)m_dt * (float)60;
       m_tile_meshes.at(0).update(std::array{
           glm::vec3{p0, 2},
           glm::vec3{p1, 1},

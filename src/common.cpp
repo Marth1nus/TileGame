@@ -2,7 +2,7 @@
 
 namespace game::utils
 {
-  auto snprintf(std::span<char> buf, MSVC_FMT_STR char const *fmt, ...) -> snprintf_result GNU_FORMAT_ATTRIB(2, 3)
+  auto snprintf(std::span<char> buf, MSVC_FMT_STR char const *fmt, ...) -> snprintf_result
   {
     auto msg = buf.data();
     auto cap = buf.size(), len = (size_t)0;
@@ -16,11 +16,26 @@ namespace game::utils
       if (len < cap)
         break;
       cap = len + 1;
-      str = std::unique_ptr<char[]>(new char[cap]);
+      str = std::make_unique<char[]>(cap);
       msg = str.get();
       continue;
     }
     return {{msg, len}, std::move(str)};
+  }
+  auto errorf(MSVC_FMT_STR char const *fmt, ...) -> void
+  {
+#if defined(__EMSCRIPTEN__)
+    auto msg = fmt;
+#else  // defined(__EMSCRIPTEN__)
+    char buf[0x100];
+    auto [msg_sv, alloc] = snprintf(buf, "\033[31m%s\033[0m\n", fmt);
+    auto msg = msg_sv.data();
+#endif // defined(__EMSCRIPTEN__)
+    va_list args;
+    va_start(args, fmt);
+    std::vfprintf(stderr, msg, args);
+    va_end(args);
+    error_breakpoint();
   }
   auto read_all(char const *filepath, char const *mode) -> std::string
   {
