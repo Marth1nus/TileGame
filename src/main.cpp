@@ -15,22 +15,22 @@
 #include <ranges>
 #include <algorithm>
 
+#include <stb_image.h>
+#include <stb_image_write.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <GLFW/glfw3.h>
 
-#include <stb_image.h>
-
-#ifdef USE_GLAD
+#if defined(USE_GLAD)
 #include <glad/glad.h>
 #else // defined(USE_GLAD)
 #include <GLES3/gl3.h>
 #endif // defined(USE_GLAD)
 
-#ifdef __EMSCRIPTEN__
-#include <GLFW/glfw3.h>
-#else // __EMSCRIPTEN__
-#include <GLFW/glfw3.h>
-#endif // __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#else  // defined(__EMSCRIPTEN__)
+#endif // defined(__EMSCRIPTEN__)
 
 namespace game
 {
@@ -48,7 +48,7 @@ namespace game::utils
     std::string_view msg;
     std::unique_ptr<char[]> alloc = {};
   };
-  static auto snprintf(std::span<char> buf, char const *fmt, ...) -> snprintf_result
+  auto static snprintf(std::span<char> buf, char const *fmt, ...) -> snprintf_result
   {
     auto msg = buf.data();
     auto cap = buf.size(), len = (size_t)0;
@@ -68,7 +68,7 @@ namespace game::utils
     }
     return {{msg, len}, std::move(str)};
   }
-  static inline auto assertf(auto &&value, char const *fmt, auto... args) -> decltype(value)
+  auto static inline assertf(auto &&value, char const *fmt, auto... args) -> decltype(value)
   {
     if (value)
       return std::forward<decltype(value)>(value);
@@ -81,11 +81,19 @@ namespace game::utils
       throw failed_assert{msg.data()};
     }
   }
-  static inline auto errorf(char const *fmt, auto... args) -> void
+  auto static inline errorf(char const *fmt, auto... args) -> void
   {
+#if defined(__EMSCRIPTEN__)
+    auto msg = fmt;
+#else  // defined(__EMSCRIPTEN__)
     char buf[0x100];
-    auto [msg, alloc] = snprintf(buf, "\033[31m%s\033[0m\n", fmt);
-    std::fprintf(stderr, msg.data(), args...);
+    auto [msg_sv, alloc] = snprintf(buf, "\033[31m%s\033[0m\n", fmt);
+    auto msg = msg_sv.data();
+#endif // defined(__EMSCRIPTEN__)
+    if constexpr (sizeof...(args))
+      std::fprintf(stderr, msg, args...);
+    else
+      std::fprintf(stderr, "%s", msg);
     error_breakpoint();
   }
   auto static glErrorName(GLenum err) -> char const *
@@ -100,16 +108,16 @@ namespace game::utils
     /* clang-format off */ default:                               return "UNKNOWN_ERROR";                 /* clang-format on */
     }
   }
-  auto inline constexpr glCheckError(char const *file, int line) -> void
+  auto inline constexpr glCheckError(char const *func, int line) -> void
   {
     for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
-      utils::errorf("GLES Error 0x%3x %32s --- on %s:%d", err, glErrorName(err), file, line);
+      utils::errorf("GLES Error 0x%3x %32s --- on %s:%d", err, glErrorName(err), func, line);
   }
-#define glCheckError() ::game::utils::glCheckError(__FILE__, __LINE__)
-  auto read_all(char const *filepath)
+#define glCheckError() ::game::utils::glCheckError(__FUNCTION__, __LINE__)
+  auto static read_all(char const *filepath, char const *mode = "r")
   {
     auto res = std::string{};
-    if (auto file = std::fopen(filepath, "r"))
+    if (auto file = std::fopen(filepath, mode))
     {
       std::fseek(file, 0, SEEK_END), res.resize(std::ftell(file));
       std::fseek(file, 0, SEEK_SET), res.resize(std::fread(res.data(), sizeof(res[0]), res.size(), file));
@@ -277,12 +285,14 @@ namespace game::render
       m_tile_pixels_size /*     */ = std::exchange(value.m_tile_pixels_size /*     */, {});
     }
     renderer(std::string_view vert_glsl, std::string_view frag_glsl,
-             glm::uvec2 tile_pixels_size, glm::uvec3 atlas_tiles_size, std::span<uint8_t> pixels = {})
+             glm::uvec2 tile_pixels_size, glm::uvec3 atlas_tiles_size, std::span<uint8_t const> rgba_u8_subpixels = {})
     {
+      auto const subpixel_length = 4u;
+      auto const subpixels = rgba_u8_subpixels;
       auto const pixels_size = atlas_tiles_size * glm::uvec3{tile_pixels_size, 1};
-      auto const pixels_bytes_size = sizeof(uint8_t[4]) * pixels_size.x * pixels_size.y * pixels_size.z;
-      utils::assertf(not pixels.data() or pixels.size() == pixels_bytes_size,
-                     "Provided pixels is expected to have %zub but got %zub", pixels_bytes_size, pixels.size());
+      auto const pixels_bytes_size = subpixel_length * pixels_size.x * pixels_size.y * pixels_size.z;
+      utils::assertf(not subpixels.data() or subpixels.size() == pixels_bytes_size,
+                     "Provided pixels is expected to have %zub but got %zub", pixels_bytes_size, subpixels.size());
       m_tile_pixels_size = tile_pixels_size;
       m_atlas_tiles_size = atlas_tiles_size;
       glGenTextures(1, &m_tid);
@@ -291,7 +301,7 @@ namespace game::render
       glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
       glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
       glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
-      glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, pixels_size.x, pixels_size.y, pixels_size.z, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+      glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, pixels_size.x, pixels_size.y, pixels_size.z, 0, GL_RGBA, GL_UNSIGNED_BYTE, subpixels.data());
       glCheckError();
       m_pid = gl::make_program(vert_glsl, frag_glsl);
       uniform_prep();
@@ -332,34 +342,61 @@ namespace game::render
     auto uniform_v(std::string_view name, std::span<glm::vec<4, uint32_t /* */> const> values) -> void { glUniform4uiv(uniform_location(name), (GLsizei)values.size(), &values[0][0]), glCheckError(); }
     auto uniform_v(std::string_view name, std::span<glm::vec<4, int32_t /*  */> const> values) -> void { glUniform4iv(uniform_location(name), (GLsizei)values.size(), &values[0][0]), glCheckError(); }
     auto uniform_v(std::string_view name, std::span<glm::vec<4, float /*    */> const> values) -> void { glUniform4fv(uniform_location(name), (GLsizei)values.size(), &values[0][0]), glCheckError(); }
-    auto inline uniform(std::string_view name, auto const &value) -> void
-      requires requires { uniform_v(name, std::span{&value, 1}); }
-    {
-      return uniform_v(name, std::span{&value, 1});
-    }
-    auto inline uniform(std::string_view name, auto const &value) -> void
-      requires requires { uniform_v(name, value); }
-    {
-      return uniform_v(name, value);
-    }
+    auto inline uniform(std::string_view name, auto const &value) -> void /* clang-format off */ requires requires { uniform_v(name, std::span{&value, 1}); } { return uniform_v(name, std::span{&value, 1}); } /* clang-format on */
+    auto inline uniform(std::string_view name, auto const &value) -> void /* clang-format off */ requires requires { uniform_v(name,            value    ); } { return uniform_v(name,            value    ); } /* clang-format on */
 
-    auto upload_tile_texture(uint32_t tile_id, std::span<uint8_t> pixels)
+    auto upload_tile_texture(uint32_t tile_id, std::span<uint8_t const> rgba_u8_subpixels)
     {
-      auto const expected_pixels_length = m_tile_pixels_size.x * m_tile_pixels_size.x * sizeof(uint8_t[4]);
-      utils::assertf(pixels.size() == expected_pixels_length, "Expected %zu (%ux%ux%u) bytes. Got %zu", expected_pixels_length, m_tile_pixels_size.x, m_tile_pixels_size.y, 4u, pixels.size());
+      auto const subpixels = rgba_u8_subpixels;
+      auto const atlas_tiles_size = m_atlas_tiles_size;
+      auto const tile_pixels_size = glm::uvec3{m_tile_pixels_size, 1};
+      utils::assertf(0 < tile_id and tile_id <= atlas_tiles_size.x * atlas_tiles_size.y, "%s", "Tile id %u out of range", tile_id);
+      auto const expected_pixels_length = tile_pixels_size.x * tile_pixels_size.x * sizeof(uint8_t[4]);
+      utils::assertf(subpixels.size() == expected_pixels_length, "Expected %zu (%ux%ux%u) bytes. Got %zu", expected_pixels_length, tile_pixels_size.x, tile_pixels_size.y, 4u, subpixels.size());
       auto const tile_pos = glm::uvec3{
-          ((tile_id - 1u) % (m_atlas_tiles_size.x * m_atlas_tiles_size.y)) % m_atlas_tiles_size.x, //
-          ((tile_id - 1u) % (m_atlas_tiles_size.x * m_atlas_tiles_size.y)) / m_atlas_tiles_size.x, //
-          ((tile_id - 1u) / (m_atlas_tiles_size.x * m_atlas_tiles_size.y))                         //
+          /**/ ((tile_id - 1u) % (atlas_tiles_size.x * atlas_tiles_size.y)) % atlas_tiles_size.x,
+          /**/ ((tile_id - 1u) % (atlas_tiles_size.x * atlas_tiles_size.y)) / atlas_tiles_size.x,
+          /**/ ((tile_id - 1u) / (atlas_tiles_size.x * atlas_tiles_size.y)) //
       };
-      auto const pixels_pos = tile_pos * glm::uvec3{m_tile_pixels_size, 1};
+      auto const pixels_pos = tile_pos * tile_pixels_size;
       glBindTexture(GL_TEXTURE_2D_ARRAY, m_tid);
       glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
                       pixels_pos.x, pixels_pos.y, pixels_pos.z,
-                      m_tile_pixels_size.x, m_tile_pixels_size.y,
-                      0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+                      tile_pixels_size.x, tile_pixels_size.y, tile_pixels_size.z,
+                      GL_RGBA, GL_UNSIGNED_BYTE, subpixels.data());
       glCheckError();
     }
+    auto upload_tile_textures(uint32_t tile_id_start, std::span<uint8_t const> rgba_u8_subpixels, size_t pixels_width)
+    {
+      auto const subpixel_length = 4u;
+      auto const src_subpixels = rgba_u8_subpixels;
+      auto const tile_pixels_size = m_tile_pixels_size;
+      auto const src_pixels_size = glm::uvec2{pixels_width, src_subpixels.size() / (pixels_width * subpixel_length)};
+      auto const src_tiles_size = src_pixels_size / tile_pixels_size;
+      auto const tile_id_count = src_tiles_size.x * src_tiles_size.y;
+      auto tile_pixels = std::vector<uint8_t>((size_t)tile_pixels_size.x * tile_pixels_size.y * subpixel_length);
+      for (auto i = 0u; i < tile_id_count; i++)
+      {
+        auto const tile_id = tile_id_start + i;
+        for (auto j = 0u; j < tile_pixels_size.y; j++)
+          std::ranges::copy(
+              src_subpixels.subspan(
+                  (j * src_pixels_size.x +
+                   (i % src_tiles_size.x) * tile_pixels_size.x +
+                   (i / src_tiles_size.x) * tile_pixels_size.y * src_pixels_size.x) *
+                      subpixel_length,
+                  tile_pixels_size.x * subpixel_length),
+              tile_pixels.begin() + j * tile_pixels_size.x * subpixel_length);
+        upload_tile_texture(tile_id, tile_pixels);
+        if constexpr (auto constexpr debug_save_bmps = 0)
+        {
+          char buf[0x16];
+          stbi_write_bmp(utils::snprintf(buf, "build-tiles/%04u.bmp", tile_id).msg.data(),
+                         tile_pixels_size.x, tile_pixels_size.y, subpixel_length, tile_pixels.data());
+        }
+      }
+    }
+
     auto render(tile_mesh const &tile_mesh)
     {
       glUseProgram(m_pid);
@@ -386,6 +423,7 @@ namespace game
 
     application()
     {
+      // Program Start
       struct glfw
       {
         glfw() { utils::assertf(glfwInit(), "%s %s", "glfw", "init fail"); }
@@ -398,10 +436,11 @@ namespace game
       auto window = m_window.get();
       utils::assertf(window, "%s %s", "window", "init fail");
       glfwMakeContextCurrent(window);
-#ifdef USE_GLAD
-      auto glad_init = gladLoadGLES2Loader((GLADloadproc)glfwGetProcAddress);
-      utils::assertf(glad_init, "%s %s", "glad", "init fail");
-#endif // USE_GLAD
+#if defined(USE_GLAD)
+      utils::assertf(gladLoadGLES2Loader((GLADloadproc)glfwGetProcAddress), "%s %s", "glad", "init fail");
+#else  // defined(USE_GLAD)
+#endif // defined(USE_GLAD)
+      // Constructor End
     }
     ~application()
     {
@@ -411,11 +450,26 @@ namespace game
       m_time_update_stamp = glfwGetTime();
       m_running = true;
       setup();
+#if defined(__EMSCRIPTEN__)
+      auto static loop = [this]
+      {
+        if (m_running and events())
+        {
+          update();
+          render();
+        }
+        else
+          emscripten_cancel_main_loop();
+      };
+      emscripten_set_main_loop([]
+                               { loop(); }, 0, 1);
+#else  // defined(__EMSCRIPTEN__)
       while (m_running and events())
       {
         update();
         render();
       }
+#endif // defined(__EMSCRIPTEN__)
       shutdown();
       return 0;
     }
@@ -423,10 +477,6 @@ namespace game
   private:
     auto setup() -> void
     {
-      glEnable(GL_BLEND);
-      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-      glEnable(GL_DEPTH_TEST);
-
       glfwSetWindowSizeCallback(m_window.get(), [](GLFWwindow *window, int width, int height)
                                 { glViewport(0, 0, width, height); });
 
@@ -435,13 +485,19 @@ namespace game
           stbi_load("res/rpg-asset-pack/3x/RPG tileset (full) v1.7 - 300%.png",
                     &width, &height, &channels, channels),
           stbi_image_free};
+      utils::assertf(pixels, "failed to load tile atlas image");
       auto tile_pixels_size = glm::uvec2{48, 48};
+      auto atlas_tiles_size = glm::uvec3{glm::uvec2{width, height} / tile_pixels_size, 1};
+      auto atlas_pixels_size = atlas_tiles_size * glm::uvec3{tile_pixels_size, 1};
+      auto pixels_span = std::span{pixels.get(), sizeof(uint8_t[4]) * atlas_pixels_size.x * atlas_pixels_size.y * atlas_pixels_size.z};
       m_renderer = {
           utils::read_all("res/shader/tile.vert.glsl"),
           utils::read_all("res/shader/tile.frag.glsl"),
           tile_pixels_size,
-          {glm::uvec2{width, height} / tile_pixels_size, 1},
-          std::span{pixels.get(), sizeof(uint8_t[4]) * width * height}};
+          atlas_tiles_size,
+          // pixels_span,
+      };
+      m_renderer.upload_tile_textures(1, pixels_span, width);
       m_renderer.uniform_prep();
       m_renderer.uniform("projection", glm::ortho<float>(-16, 16, 16, -16));
       m_tile_meshes.clear();
@@ -449,25 +505,28 @@ namespace game
           .emplace_back(glm::uvec2{5, 5}) // make a 4x4 tile chunk
           .upload(
               // tile ids
-              std::array<uint32_t, 5 * 5 * 2>{
-                  // chunk 0 tiles
-                  1, 0, 0, 0, 3,
-                  0, 1, 2, 3, 0,
-                  0, 33, 34, 35, 0,
-                  0, 65, 66, 67, 0,
-                  65, 0, 0, 0, 67, //
-                  // chunk 1 tiles
-                  96 + 1, 96 + 0, 96 + 0, 96 + 0, 96 + 3,
-                  96 + 0, 96 + 1, 96 + 2, 96 + 3, 96 + 0,
-                  96 + 0, 96 + 33, 96 + 34, 96 + 35, 96 + 0,
-                  96 + 0, 96 + 65, 96 + 66, 96 + 67, 96 + 0,
-                  96 + 65, 96 + 0, 96 + 0, 96 + 0, 96 + 67, //
+              std::array<uint32_t, 5 * 5 * 3>{
+                  //
+                  01, 02, 00, 02, 03,
+                  33, 00, 02, 00, 35,
+                  00, 33, 34, 35, 00,
+                  33, 00, 66, 00, 35,
+                  65, 66, 00, 66, 67, //
+                  //
+                  00 + 00, 00 + 00, 96 + 02, 00 + 00, 00 + 00,
+                  00 + 00, 96 + 01, 00 + 00, 96 + 03, 00 + 00,
+                  96 + 33, 00 + 00, 96 + 34, 00 + 00, 96 + 35,
+                  00 + 00, 96 + 65, 00 + 00, 96 + 67, 00 + 00,
+                  00 + 00, 00 + 00, 96 + 66, 00 + 00, 00 + 00, //
+                  //
+                  00, 00, 00, 00, 00,
+                  00, 00, 00, 00, 00,
+                  00, 00, 00, 00, 00,
+                  00, 00, 00, 00, 00,
+                  00, 00, 00, 00, 00, //
               },
               // chunk positions
-              std::array{
-                  glm::vec3{0, 0, 0},      // chunk 0 position
-                  glm::vec3{-2.5, -5, -1}, // chunk 1 position
-              });
+              std::array<glm::vec3, 3>{});
     }
     auto events() -> bool
     {
@@ -480,20 +539,45 @@ namespace game
       if (new_stamp - old_stamp < m_dt)
         return;
       old_stamp = new_stamp;
-      auto static i = 0;
-      std::printf("| Update:%4d | Time: %9.6lfs |\n", i++, glfwGetTime());
-
+      {
+        auto static i = 0;
+        std::printf("| Update:%4d | Time: %9.6lfs |\n", i++, glfwGetTime());
+      }
       if (m_tile_meshes.empty())
         return;
-      auto mx = 0.0, my = mx;
-      glfwGetCursorPos(m_window.get(), &mx, &my);
-      auto ww = 0, wh = ww;
-      glfwGetWindowSize(m_window.get(), &ww, &wh);
-      auto p = glm::clamp(glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f, {-16, -16}, {11, 11});
-      auto static p0 = p, p1 = p;
-      p0 = 0.999f * (p0 + (p - p0) * 0.10f);
-      p1 = 0.999f * (p1 + (p - p1) * 0.01f);
-      m_tile_meshes.at(0).update(std::array{glm::vec3{p0, 0}, glm::vec3{p1, 0}});
+      {
+        auto mx = 0.0, my = mx;
+        glfwGetCursorPos(m_window.get(), &mx, &my);
+        auto ww = 0, wh = ww;
+        glfwGetWindowSize(m_window.get(), &ww, &wh);
+        auto p = glm::clamp(glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f, {-16, -16}, {11, 11});
+        auto static p0 = p, p1 = p, p2 = p;
+        p0 += (p - p0) * 0.08f;
+        p1 += (p - p1) * 0.04f;
+        p2 += (p - p2) * 0.06f;
+        m_tile_meshes.at(0).update(std::array{
+            glm::vec3{p0, 2},
+            glm::vec3{p1, 1},
+            glm::vec3{p2, 3}, //
+        });
+      }
+      {
+        auto house_pos =
+            glm::uvec2{10, 14} +
+            glm::uvec2{5, 5} *
+                std::array{
+                    glm::uvec2{0, 0},
+                    glm::uvec2{1, 0},
+                    glm::uvec2{0, 1},
+                    glm::uvec2{1, 1},
+                }
+                    .at(int(glfwGetTime()) % 4);
+        auto house = std::array<uint32_t, 5 * 5>{};
+        for (auto i = 0; i < 5; i++)
+          for (auto j = 0; j < 5; j++)
+            house.at(5 * i + j) = 1 + 32 * (house_pos.x + i) + (house_pos.y + j);
+        m_tile_meshes.at(0).update(house, 2);
+      }
     }
     auto render() -> void
     {
@@ -502,6 +586,9 @@ namespace game
 
       auto window = m_window.get();
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
       m_renderer.uniform_prep();
 

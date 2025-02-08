@@ -2,7 +2,7 @@
 precision highp float;
 precision highp sampler2DArray;
 
-in vec2 fragment_pos;
+// in vec2 fragment_pos;
 in vec3 fragment_uv;
 
 uniform sampler2DArray atlas;

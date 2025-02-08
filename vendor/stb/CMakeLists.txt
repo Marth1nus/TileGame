@@ -15,7 +15,7 @@ if (NOT EXISTS ${STB_DIR})
   endif()
 endif()
 
-add_library(${PROJECT_NAME} stb_image.c)
+add_library(${PROJECT_NAME} stb.c)
 target_include_directories(${PROJECT_NAME} PUBLIC ${STB_DIR})
 
 

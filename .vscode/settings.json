@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "assertf",
+    "bmps",
     "Emscripten",
     "errorf",
     "GLES",
@@ -91,6 +92,7 @@
     "set": "cpp",
     "unordered_set": "cpp",
     "xtree": "cpp",
-    "ranges": "cpp"
+    "ranges": "cpp",
+    "stb_image_write.h": "c"
   }
 }
