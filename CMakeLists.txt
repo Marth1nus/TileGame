@@ -6,18 +6,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
-FetchContent_Declare(glm   GIT_REPOSITORY https://github.com/g-truc/glm      GIT_TAG master)
-FetchContent_Declare(box2d GIT_REPOSITORY https://github.com/erincatto/box2d GIT_TAG v3.0.0)
-FetchContent_MakeAvailable(glm box2d)
+FetchContent_Declare(glm   GIT_REPOSITORY https://github.com/g-truc/glm          GIT_TAG master)
+FetchContent_Declare(box2d GIT_REPOSITORY https://github.com/erincatto/box2d     GIT_TAG v3.0.0)
+FetchContent_Declare(lua   GIT_REPOSITORY https://github.com/Marth1nus/lua-cmake GIT_TAG master)
+set(LUA_VERSION "5.4.7")
+FetchContent_MakeAvailable(glm box2d lua)
 add_subdirectory(vendor/stb)
+add_subdirectory(vendor/imgui)
 
 add_executable(${PROJECT_NAME}
   src/application.cpp
   src/common.cpp
   src/main.cpp
   src/render.cpp
+  vendor/imgui/imgui/backends/imgui_impl_glfw.cpp
+  vendor/imgui/imgui/backends/imgui_impl_opengl3.cpp
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm stb box2d)
+target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm stb box2d imgui lua)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   set_target_properties(${PROJECT_NAME} PROPERTIES

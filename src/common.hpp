@@ -17,6 +17,7 @@
 
 #include <ranges>
 #include <algorithm>
+#include <source_location>
 
 #include <stb_image.h>
 #include <stb_image_write.h>

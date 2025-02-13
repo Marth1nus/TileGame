@@ -6,12 +6,12 @@ set(STB_TAG "master")
 set(STB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/stb")
 
 if (NOT EXISTS ${STB_DIR})
-  message(STATUS "Clone ${STB_REPO_URL} ${STB_TAG}")
+  message(STATUS "Clone ${STB_URL} ${STB_TAG}")
   execute_process(COMMAND git clone --branch ${STB_TAG} ${STB_URL}
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                   RESULT_VARIABLE GIT_CLONE_RESULT)
   if (NOT GIT_CLONE_RESULT EQUAL "0")
-    message(FATAL_ERROR "[FAIL] Clone ${STB_REPO_URL} ${STB_TAG}")
+    message(FATAL_ERROR "[FAIL] Clone ${STB_URL} ${STB_TAG}")
   endif()
 endif()
 

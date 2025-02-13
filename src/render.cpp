@@ -6,7 +6,7 @@
 #include <GLES3/gl3.h>
 #endif // defined(USE_GLAD)
 
-#define glCheckError() ::game::render::gl::gl_check_error(__FUNCTION__, __LINE__)
+#define glCheckError ::game::render::gl::gl_check_error
 
 namespace game::render::gl
 {
@@ -22,10 +22,10 @@ namespace game::render::gl
     /* clang-format off */ default:                               return "UNKNOWN_ERROR";                 /* clang-format on */
     }
   }
-  auto static gl_check_error(char const *func, int line) -> void
+  auto static gl_check_error(std::source_location location = std::source_location::current()) -> void
   {
     for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
-      utils::errorf("GLES Error 0x%3x %32s --- on %s:%d", err, gl_error_name(err), func, line);
+      utils::errorf("GLES Error 0x%03x %-18s on line %u from function `%s`", err, gl_error_name(err), location.line(), location.function_name());
   }
   auto static make_shader(int32_t shader_type, std::string_view glsl) -> uint32_t
   {
@@ -165,18 +165,25 @@ namespace game::render // renderer
     auto const subpixel_length = 4u;
     auto const subpixels = rgba_u8_subpixels;
     auto const pixels_size = atlas_tiles_size * glm::uvec3{tile_pixels_size, 1};
-    auto const pixels_bytes_size = subpixel_length * pixels_size.x * pixels_size.y * pixels_size.z;
-    utils::assertf(not subpixels.data() or subpixels.size() == pixels_bytes_size,
-                   "Provided pixels is expected to have %zub but got %zub", pixels_bytes_size, subpixels.size());
+    auto const bytes_size = subpixel_length * pixels_size.x * pixels_size.y * pixels_size.z;
+    utils::assertf(not subpixels.data() or subpixels.size() == bytes_size,
+                   "Provided pixels is expected to have %zub but got %zub", bytes_size, subpixels.size());
     m_tile_pixels_size = tile_pixels_size;
     m_atlas_tiles_size = atlas_tiles_size;
     glGenTextures(1, &m_tid);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_tid);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_MIRRORED_REPEAT);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, pixels_size.x, pixels_size.y, pixels_size.z, 0, GL_RGBA, GL_UNSIGNED_BYTE, subpixels.data());
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, pixels_size.x, pixels_size.y, pixels_size.z);
+    glCheckError();
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                    0, 0, 0,
+                    pixels_size.x, pixels_size.y, pixels_size.z,
+                    GL_RGBA, GL_UNSIGNED_BYTE,
+                    subpixels.data() ? subpixels.data() : std::make_unique<uint8_t[]>(bytes_size).get());
     glCheckError();
     m_pid = gl::make_program(vert_glsl, frag_glsl);
     uniform_prep();

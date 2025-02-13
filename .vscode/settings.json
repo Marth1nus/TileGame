@@ -2,6 +2,7 @@
   "cSpell.words": [
     "assertf",
     "bmps",
+    "emcc",
     "Emscripten",
     "errorf",
     "GLES",
@@ -11,6 +12,7 @@
     "Integerv",
     "Lsizei",
     "mpos",
+    "OPENGL",
     "Parameteri",
     "Programiv",
     "Shaderiv",
@@ -99,6 +101,7 @@
     "coroutine": "cpp",
     "stacktrace": "cpp",
     "stop_token": "cpp",
-    "thread": "cpp"
+    "thread": "cpp",
+    "source_location": "cpp"
   }
 }

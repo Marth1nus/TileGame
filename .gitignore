@@ -1,2 +1,4 @@
 build*
+!build-emcc.ps1
+imgui.ini
 res/rpg-asset-pack

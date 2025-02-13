@@ -4,7 +4,8 @@
 #include "common.hpp"
 #include "render.hpp"
 
-#include <GLFW/glfw3.h>
+struct GLFWwindow;
+struct lua_State;
 #include <box2d/box2d.h>
 
 namespace game
@@ -33,6 +34,8 @@ namespace game
 
     b2WorldId m_world_id = b2_nullWorldId;
     std::vector<b2BodyId> m_bodies;
+
+    std::shared_ptr<lua_State> m_L;
 
     double m_time_update_stamp = 0, m_dt = 1.0 / 30.0;
     bool m_running : 1;
