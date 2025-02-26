@@ -3,10 +3,10 @@
 
 #include "common.hpp"
 #include "render.hpp"
+#include "entity.hpp"
 
 struct GLFWwindow;
 struct lua_State;
-#include <box2d/box2d.h>
 
 namespace game
 {
@@ -27,17 +27,19 @@ namespace game
     auto shutdown() -> void;
 
   private:
-    std::shared_ptr<GLFWwindow> m_window;
+    std::shared_ptr<GLFWwindow> m_window{};
 
-    render::renderer m_renderer;
-    std::vector<render::tile_mesh> m_tile_meshes;
+    render::renderer m_renderer{};
+    std::vector<render::tile_mesh> m_tile_meshes{};
+
+    entt::registry m_registry{};
 
     b2WorldId m_world_id = b2_nullWorldId;
-    std::vector<b2BodyId> m_bodies;
+    std::vector<b2BodyId> m_bodies{};
 
-    std::shared_ptr<lua_State> m_L;
+    std::shared_ptr<lua_State> m_L{};
 
-    double m_time_update_stamp = 0, m_dt = 1.0 / 30.0;
+    double m_time_update_stamp = 0, m_dt = 1.0 / 60.0;
     bool m_running : 1;
   };
 }

@@ -6,7 +6,7 @@
 #include <GLES3/gl3.h>
 #endif // defined(USE_GLAD)
 
-#define glCheckError ::game::render::gl::gl_check_error
+#define glCheckError(...) ::game::render::gl::gl_check_error(__VA_ARGS__)
 
 namespace game::render::gl
 {
@@ -24,7 +24,8 @@ namespace game::render::gl
   }
   auto static gl_check_error(std::source_location location = std::source_location::current()) -> void
   {
-    for (GLenum err; (err = glGetError()) not_eq GL_NO_ERROR;)
+    GLenum err;
+    while ((err = glGetError()) not_eq GL_NO_ERROR)
       utils::errorf("GLES Error 0x%03x %-18s on line %u from function `%s`", err, gl_error_name(err), location.line(), location.function_name());
   }
   auto static make_shader(int32_t shader_type, std::string_view glsl) -> uint32_t
@@ -151,6 +152,7 @@ namespace game::render // tile_mesh
 }
 namespace game::render // renderer
 {
+
   renderer::renderer(renderer &&value) noexcept
   {
     m_pid /*                  */ = std::exchange(value.m_pid /*                  */, {});
@@ -208,9 +210,9 @@ namespace game::render // renderer
     auto location = glGetUniformLocation(m_pid, name_str.get());
     auto name_sv = std::string_view{name_str.get(), name.size()};
     m_unifrom_locations[name_sv] = std::pair{std::move(name_str), location};
-    return location;
+    return glCheckError(), location;
   }
-  auto renderer::uniform_prep() -> void { glUseProgram(m_pid); }
+  auto renderer::uniform_prep() -> void { glUseProgram(m_pid), glCheckError(); }
   auto renderer::uniform_v(std::string_view name, std::span<glm::mat<4, 4, float /* */> const> values) -> void { glUniformMatrix4fv(uniform_location(name), (GLsizei)values.size(), GL_FALSE, &values[0][0][0]), glCheckError(); }
   auto renderer::uniform_v(std::string_view name, std::span<glm::vec<1, uint32_t /* */> const> values) -> void { glUniform1uiv(uniform_location(name), (GLsizei)values.size(), &values[0][0]), glCheckError(); }
   auto renderer::uniform_v(std::string_view name, std::span<glm::vec<1, int32_t /*  */> const> values) -> void { glUniform1iv(uniform_location(name), (GLsizei)values.size(), &values[0][0]), glCheckError(); }
@@ -279,11 +281,13 @@ namespace game::render // renderer
 
   auto renderer::render(tile_mesh const &tile_mesh) -> void
   {
+    glCheckError();
     glUseProgram(m_pid);
     glBindVertexArray(tile_mesh.m_vao);
-    glCheckError();
     uniform("chunk_size", tile_mesh.m_chunk_size);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)tile_mesh.m_instance_count);
+    glCheckError();
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)tile_mesh.m_instance_count), glCheckError();
     glCheckError();
   }
+  auto renderer::check_error(std::source_location location) -> void { glCheckError(location); }
 }

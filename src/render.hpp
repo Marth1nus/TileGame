@@ -28,8 +28,8 @@ namespace game::render
     auto update(std::span<glm::vec3 const> positions, size_t chunk_index_offset = 0) -> void;
 
   private:
-    uint32_t m_vao, m_vbo_instance_tile, m_vbo_instance_pos, m_instance_count;
-    glm::uvec2 m_chunk_size;
+    uint32_t m_vao{}, m_vbo_instance_tile{}, m_vbo_instance_pos{}, m_instance_count{};
+    glm::uvec2 m_chunk_size{};
     friend struct renderer;
   };
   struct renderer
@@ -66,11 +66,13 @@ namespace game::render
 
     auto render(tile_mesh const &tile_mesh) -> void;
 
+    auto check_error(std::source_location location = std::source_location::current()) -> void;
+
   private:
-    uint32_t m_pid, m_tid;
-    std::unordered_map<std::string_view, std::pair<std::unique_ptr<char[]>, int32_t>> m_unifrom_locations;
-    glm::uvec2 m_tile_pixels_size;
-    glm::uvec3 m_atlas_tiles_size;
+    uint32_t m_pid{}, m_tid{};
+    std::unordered_map<std::string_view, std::pair<std::unique_ptr<char[]>, int32_t>> m_unifrom_locations{};
+    glm::uvec2 m_tile_pixels_size{};
+    glm::uvec3 m_atlas_tiles_size{};
   };
 }
 

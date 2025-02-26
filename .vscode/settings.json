@@ -4,6 +4,7 @@
     "bmps",
     "emcc",
     "Emscripten",
+    "entt",
     "errorf",
     "GLES",
     "glfw",
@@ -102,6 +103,10 @@
     "stacktrace": "cpp",
     "stop_token": "cpp",
     "thread": "cpp",
-    "source_location": "cpp"
+    "source_location": "cpp",
+    "deque": "cpp",
+    "memory_resource": "cpp",
+    "mutex": "cpp",
+    "regex": "cpp"
   }
 }

@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstdarg>
+#include <cstring>
 
 #include <stdexcept>
 #include <string_view>
@@ -18,6 +19,7 @@
 #include <ranges>
 #include <algorithm>
 #include <source_location>
+#include <utility>
 
 #include <stb_image.h>
 #include <stb_image_write.h>

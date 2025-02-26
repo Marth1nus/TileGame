@@ -80,6 +80,7 @@ namespace game
     ImGui::DestroyContext();
 
     m_L = {};
+    m_registry = {};
     for (auto body_id : std::exchange(m_bodies, {}))
       b2DestroyBody(body_id);
     b2DestroyWorld(std::exchange(m_world_id, {}));
@@ -214,8 +215,6 @@ namespace game
     if (new_stamp - old_stamp < m_dt)
       return;
     old_stamp = new_stamp;
-    auto static i = 0;
-    std::printf("| Update:%4d | Time: %9.6lfs |\n", i++, glfwGetTime());
     b2World_Step(m_world_id, m_dt, 8);
     { // display b2world boxes
       auto static bodies_positions = std::vector<glm::vec3>{};
