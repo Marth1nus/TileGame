@@ -28,16 +28,13 @@ namespace game
 
   private:
     std::shared_ptr<GLFWwindow> m_window{};
+    std::shared_ptr<lua_State> m_L{};
 
-    render::renderer m_renderer{};
-    std::vector<render::tile_mesh> m_tile_meshes{};
-
-    entt::registry m_registry{};
+    render::program m_program{};
+    render::font m_font{};
 
     b2WorldId m_world_id = b2_nullWorldId;
-    std::vector<b2BodyId> m_bodies{};
-
-    std::shared_ptr<lua_State> m_L{};
+    entt::registry m_registry{};
 
     double m_time_update_stamp = 0, m_dt = 1.0 / 60.0;
     bool m_running : 1;

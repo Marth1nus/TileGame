@@ -38,8 +38,6 @@ namespace game
       auto window = m_window.get();
       utils::assertf(window, "%s %s", "window", "init fail");
       glfwMakeContextCurrent(window);
-    }
-    { // m_renderer + m_tile_meshes
 #if defined(USE_GLAD)
       utils::assertf(gladLoadGLES2Loader((GLADloadproc)glfwGetProcAddress), "%s %s", "glad", "init fail");
 #else  // defined(USE_GLAD)
@@ -81,11 +79,7 @@ namespace game
 
     m_L = {};
     m_registry = {};
-    for (auto body_id : std::exchange(m_bodies, {}))
-      b2DestroyBody(body_id);
     b2DestroyWorld(std::exchange(m_world_id, {}));
-    m_tile_meshes.clear();
-    m_renderer = {};
     m_window = {};
   }
   auto application::run() -> int
@@ -93,25 +87,28 @@ namespace game
     m_time_update_stamp = glfwGetTime();
     m_running = true;
     setup();
-#if defined(__EMSCRIPTEN__)
-    auto static loop = [this]
+    auto const frame = [this]
     {
-      if (m_running and events())
+      if (events())
       {
         update();
         render();
+        return m_running;
       }
-      else
+      return m_running = false;
+    };
+#if defined(__EMSCRIPTEN__)
+    auto static frame_static = &frame;
+    frame_static = &frame;
+    auto static constexpr emscripten_main_loop = []
+    {
+      if (not (*frame_static)())
         emscripten_cancel_main_loop();
     };
-    emscripten_set_main_loop([]
-                             { loop(); }, 0, 1);
+    emscripten_set_main_loop(emscripten_main_loop, 0, 1);
 #else  // defined(__EMSCRIPTEN__)
-    while (m_running and events())
-    {
-      update();
-      render();
-    }
+    while (frame()) // expected to be inlined
+      ;
 #endif // defined(__EMSCRIPTEN__)
     shutdown();
     return 0;
@@ -119,95 +116,11 @@ namespace game
 
   auto application::setup() -> void
   {
-    auto const vw = 16;
-    { // Renderer test
-      auto width = 0, height = 0, channels = 4;
-      auto pixels = std::shared_ptr<uint8_t>{
-          stbi_load("res/rpg-asset-pack/3x/RPG tileset (full) v1.7 - 300%.png",
-                    &width, &height, &channels, channels),
-          stbi_image_free};
-      utils::assertf(pixels, "%s", "failed to load tile atlas image");
-      auto tile_pixels_size = glm::uvec2{48, 48};
-      auto atlas_tiles_size = glm::uvec3{glm::uvec2{width, height} / tile_pixels_size, 1};
-      auto atlas_pixels_size = atlas_tiles_size * glm::uvec3{tile_pixels_size, 1};
-      auto pixels_span = std::span{pixels.get(), sizeof(uint8_t[4]) * atlas_pixels_size.x * atlas_pixels_size.y * atlas_pixels_size.z};
-      m_renderer = {
-          utils::read_all("res/shader/tile.vert.glsl"),
-          utils::read_all("res/shader/tile.frag.glsl"),
-          tile_pixels_size,
-          atlas_tiles_size,
-          // pixels_span,
-      };
-      m_renderer.upload_tile_textures(1, pixels_span, width);
-      m_renderer.uniform_prep();
-      m_renderer.uniform("projection", glm::ortho<float>(-vw, vw, vw, -vw));
-      m_tile_meshes.clear();
-      m_tile_meshes
-          .emplace_back(glm::uvec2{5, 5}) // make a 4x4 tile chunk
-          .upload(
-              // tile ids
-              std::array<uint32_t, 5 * 5 * 3>{
-                  //
-                  01, 02, 00, 02, 03,
-                  33, 00, 02, 00, 35,
-                  00, 33, 34, 35, 00,
-                  33, 00, 66, 00, 35,
-                  65, 66, 00, 66, 67, //
-                  //
-                  00 + 00, 00 + 00, 96 + 02, 00 + 00, 00 + 00,
-                  00 + 00, 96 + 01, 00 + 00, 96 + 03, 00 + 00,
-                  96 + 33, 00 + 00, 96 + 34, 00 + 00, 96 + 35,
-                  00 + 00, 96 + 65, 00 + 00, 96 + 67, 00 + 00,
-                  00 + 00, 00 + 00, 96 + 66, 00 + 00, 00 + 00, //
-                  //
-                  00, 00, 00, 00, 00,
-                  00, 00, 00, 00, 00,
-                  00, 00, 00, 00, 00,
-                  00, 00, 00, 00, 00,
-                  00, 00, 00, 00, 00, //
-              },
-              // chunk positions
-              std::array<glm::vec3, 3>{});
-    }
-    { // B2World test
-      auto const b = (float)vw;
-      for (auto [x, y, w, h] : {
-               std::array{0.0f, +b + 0, b * b, 0.5f},
-               std::array{-b - 1, 0.0f, 0.5f, b * b},
-               std::array{+b + 0, 0.0f, 0.5f, b * b},
-           })
-      {
-        b2BodyDef ground_def = b2DefaultBodyDef();
-        ground_def.position = {x, y};
-        auto ground_id = b2CreateBody(m_world_id, &ground_def);
-        auto ground_box = b2MakeBox(w, h);
-        auto ground_shape_def = b2DefaultShapeDef();
-        b2CreatePolygonShape(ground_id, &ground_shape_def, &ground_box);
-        m_bodies.push_back(ground_id);
-      }
-      for (auto i = 0u; i < vw * vw; i++)
-      {
-        auto body_def = b2DefaultBodyDef();
-        body_def.type = b2_dynamicBody;
-        body_def.position = b2Vec2{float(i & 1) * 0.5f, -float(i)};
-        auto body_id = b2CreateBody(m_world_id, &body_def);
-        auto dynamic_box = b2MakeBox(0.5f, 0.5f);
-        auto shape_def = b2DefaultShapeDef();
-        shape_def.density = 1;
-        shape_def.friction = 0.3f;
-        b2CreatePolygonShape(body_id, &shape_def, &dynamic_box);
-        m_bodies.push_back(body_id);
-      }
-      m_tile_meshes
-          .emplace_back(glm::uvec2{1, 1})
-          .upload(std::vector<uint32_t>((size_t)m_bodies.size(), 9u),
-                  std::vector<glm::vec3>((size_t)m_bodies.size(), glm::vec3{}));
-    }
   }
   auto application::events() -> bool
   {
     glfwPollEvents();
-    return not glfwWindowShouldClose(m_window.get());
+    return m_running and_eq not glfwWindowShouldClose(m_window.get());
   }
   auto application::update() -> void
   {
@@ -215,51 +128,6 @@ namespace game
     if (new_stamp - old_stamp < m_dt)
       return;
     old_stamp = new_stamp;
-    b2World_Step(m_world_id, m_dt, 8);
-    { // display b2world boxes
-      auto static bodies_positions = std::vector<glm::vec3>{};
-      bodies_positions.resize(m_bodies.size());
-      for (auto i = 0u; i < m_bodies.size(); i++)
-      {
-        auto body_id = m_bodies.at(i);
-        auto pos = b2Body_GetPosition(body_id);
-        auto rot = b2Body_GetRotation(body_id);
-        bodies_positions.at(i) = {pos.x, pos.y, 1};
-      }
-      m_tile_meshes.at(1).update(bodies_positions);
-    }
-    if (m_tile_meshes.size() > 1) // Renderer House-follow-Mouse
-    {
-      auto mx = 0.0, my = mx;
-      glfwGetCursorPos(m_window.get(), &mx, &my);
-      auto ww = 0, wh = ww;
-      glfwGetWindowSize(m_window.get(), &ww, &wh);
-      auto p = glm::clamp(glm::vec2{mx / ww, my / wh} * 32.f - 16.f - 2.5f, {-16, -16}, {11, 11});
-      auto static p0 = p, p1 = p, p2 = p;
-      p0 += (p - p0) * 0.08f * (float)m_dt * (float)60;
-      p1 += (p - p1) * 0.04f * (float)m_dt * (float)60;
-      p2 += (p - p2) * 0.06f * (float)m_dt * (float)60;
-      m_tile_meshes.at(0).update(std::array{
-          glm::vec3{p0, 2},
-          glm::vec3{p1, 1},
-          glm::vec3{p2, 3}, //
-      });
-      auto house_pos =
-          glm::uvec2{10, 14} +
-          glm::uvec2{5, 5} *
-              std::array{
-                  glm::uvec2{0, 0},
-                  glm::uvec2{1, 0},
-                  glm::uvec2{0, 1},
-                  glm::uvec2{1, 1},
-              }
-                  .at(int(glfwGetTime()) % 4);
-      auto house = std::array<uint32_t, 5 * 5>{};
-      for (auto i = 0; i < 5; i++)
-        for (auto j = 0; j < 5; j++)
-          house.at(5 * i + j) = 1 + 32 * (house_pos.x + i) + (house_pos.y + j);
-      m_tile_meshes.at(0).update(house, 2);
-    }
   }
   auto application::render() -> void
   {
@@ -306,11 +174,6 @@ namespace game
         glfwMakeContextCurrent(current_context);
       }
     }
-
-    m_renderer.uniform_prep();
-
-    for (auto const &tile_mesh : m_tile_meshes)
-      m_renderer.render(tile_mesh);
 
     glfwSwapBuffers(m_window.get());
   }

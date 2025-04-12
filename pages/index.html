@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TileGame</title>
+    <style>
+      body {
+        display: grid;
+        grid-column: auto;
+        justify-content: space-evenly;
+        background-color: black;
+        gap: 0.5em;
+      }
+      #canvas {
+        width: 98vw;
+        height: 98vh;
+        border: 1px dashed gray;
+      }
+      #output {
+        resize: none;
+        font-family: monospace;
+        background: none;
+        overflow: scroll;
+        color: white;
+        padding: 0.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    <textarea
+      id="output"
+      rows="8"
+      placeholder="stdout output"
+      disabled></textarea>
+    <input
+      type="button"
+      value="Fullscreen"
+      onclick="Module.requestFullscreen(false, true)" />
+    <a href="TileGame.html">Emscripten Generated Page</a>
+    <script>
+      var canvas = document.getElementById('canvas')
+      var Module = {
+        canvas: (() => {
+          const canvas = document.getElementById('canvas')
+          if (!(canvas instanceof HTMLCanvasElement)) return
+          let resizeTimeout
+          const onResize = () => {
+            clearTimeout(resizeTimeout)
+            resizeTimeout = setTimeout(() => {
+              Module?.setCanvasSize?.call(
+                Module,
+                canvas.clientWidth,
+                canvas.clientHeight
+              )
+            }, 16)
+          }
+          new ResizeObserver(onResize).observe(canvas)
+          return canvas
+        })(),
+        print: (() => {
+          let line = 0
+          document.getElementById('output').value = ''
+          return (...args) => {
+            const text = args.join(' ')
+            console.log(text)
+            const element = document.getElementById('output')
+            if (element instanceof HTMLTextAreaElement) {
+              element.value += `${String(++line).padStart(4, ' ')}> ${text}\n`
+              element.scrollTop = element.scrollHeight // focus on bottom
+            }
+          }
+        })(),
+        onRuntimeInitialized() {
+          const { canvas } = Module
+          if (!canvas) throw new Error('No Canvas')
+          if (!Module?.setCanvasSize) throw new Error('No Canvas Resize')
+          setTimeout(() => {
+            Module.setCanvasSize(canvas.clientWidth, canvas.clientHeight)
+          }, 1)
+        },
+      }
+    </script>
+    <script async type="text/javascript" src="TileGame.js"></script>
+  </body>
+</html>

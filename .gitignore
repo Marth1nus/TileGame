@@ -1,4 +1,5 @@
-build*
-!build-emcc.ps1
+build*/
 imgui.ini
+pages/TileGame.*
+vendor/FetchContent/
 res/rpg-asset-pack

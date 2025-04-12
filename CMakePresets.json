@@ -1,0 +1,67 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "native",
+      "displayName": "Native Multi-Config",
+      "description": "Native platform build using Ninja Multi-Config generator",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/${hostSystemName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "YES"
+      }
+    },
+    {
+      "name": "windows",
+      "inherits": "native",
+      "displayName": "Windows Multi-Config",
+      "description": "Windows platform build using Visual Studio generator",
+      "generator": "Visual Studio 17 2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "emscripten",
+      "inherits": "native",
+      "displayName": "Emscripten Multi-Config",
+      "description": "Emscripten web build using Ninja generator",
+      "binaryDir": "${sourceDir}/build/Emscripten",
+      "cacheVariables": {
+        "GITHUB_PAGES_DIR": "${sourceDir}/pages/"
+      },
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{EMSDK}",
+        "rhs": ""
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "native",
+      "configurePreset": "native"
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows"
+    },
+    {
+      "name": "emscripten",
+      "configurePreset": "emscripten"
+    },
+    {
+      "name": "default",
+      "inherits": ["native"]
+    }
+  ]
+}
