@@ -16,10 +16,6 @@ namespace game::entity::component
   {
     b2BodyId body_id;
   };
-  struct render_string
-  {
-    render::string string;
-  };
 }
 namespace game
 {

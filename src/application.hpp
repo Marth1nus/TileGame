@@ -31,7 +31,6 @@ namespace game
     std::shared_ptr<lua_State> m_L{};
 
     render::program m_program{};
-    render::font m_font{};
 
     b2WorldId m_world_id = b2_nullWorldId;
     entt::registry m_registry{};

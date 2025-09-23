@@ -12,7 +12,7 @@ namespace game::utils
         {
             va_list args;
             va_start(args, fmt);
-            len = std::vsnprintf(msg, cap, fmt, args);
+            len = (size_t)std::vsnprintf(msg, cap, fmt, args);
             va_end(args);
             if (len < cap)
                 break;
@@ -44,8 +44,8 @@ namespace game::utils
         auto res = std::string{};
         if (auto file = std::fopen(filepath, mode))
         {
-            std::fseek(file, 0, SEEK_END), res.resize(std::ftell(file));
-            std::fseek(file, 0, SEEK_SET), res.resize(std::fread(res.data(), sizeof(res[0]), res.size(), file));
+            std::fseek(file, 0, SEEK_END), res.resize((size_t)std::ftell(file));
+            std::fseek(file, 0, SEEK_SET), res.resize((size_t)std::fread(res.data(), sizeof(res[0]), res.size(), file));
             std::fclose(file);
         }
         return res;

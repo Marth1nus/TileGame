@@ -120,7 +120,7 @@ namespace game::render::object
     auto static uniform(int32_t location, std::span<glm::mat<4, 4, /* */ glm::f32> const> values) -> void;
 
     template <typename T>
-      requires(std::ranges::contiguous_range<T> and utils::arithmetic_vec_or_scalar<std::ranges::range_value_t<T>> or utils::arithmetic_vec_or_scalar<T>)
+      requires((std::ranges::contiguous_range<T> and utils::arithmetic_vec_or_scalar<std::ranges::range_value_t<T>>) or utils::arithmetic_vec_or_scalar<T>)
     auto inline uniform(std::string_view name, T const &value) -> decltype(auto)
     {
       /**/ if constexpr (utils::arithmetic_vec_or_scalar<T>)
@@ -362,70 +362,6 @@ namespace game::render // using object::
       object::texture,
       object::framebuffer,
       object::vertexarray;
-}
-namespace game::render::text
-{
-  struct character
-  {
-    glm::u32 codepoint{};
-    glm::vec2 position{}, size{};
-  };
-  struct font
-  {
-  public:
-    font() noexcept = default;
-    font(font &&) noexcept = default;
-    font(font const &) noexcept = default;
-    font &operator=(font &&value) noexcept = default;
-    font &operator=(font const &value) noexcept = default;
-    ~font() noexcept = default;
-
-    font(texture texture, glm::uvec2 glyph_size) noexcept : m_texture{texture}, m_glyph_size{glyph_size} {}
-    font(glm::u32 max_ch, glm::uvec2 glyph_size);
-
-    auto inline get_texture() const noexcept -> auto const & { return m_texture; }
-
-    auto inline get_glyph_pixels_size /*  */ (/*              */) const noexcept { return glm::uvec3{m_glyph_size, 1}; }
-    auto inline get_atlas_glyphs_size /*  */ (/*              */) const noexcept { return m_texture.get_size() / get_glyph_pixels_size(); }
-    auto inline get_max_codepoint /*      */ (/*              */) const noexcept { return COMPONENT_WISE (*)(get_atlas_glyphs_size()); }
-    auto inline get_atlas_pixels_position(glm::u32 codepoint) const noexcept { return get_atlas_glyphs_position(codepoint) * get_glyph_pixels_size(); }
-    auto /*  */ get_atlas_glyphs_position(glm::u32 codepoint) const noexcept -> glm::uvec3;
-
-    auto upload_glyph(uint32_t codepoint, texture::source source) -> void;
-    auto upload_glyphs(uint32_t codepoint_begin, texture::source source) -> decltype(codepoint_begin);
-
-  private:
-    texture m_texture{};
-    glm::uvec2 m_glyph_size{};
-  };
-  struct string
-  {
-  public:
-    string() noexcept = default;
-    string(string &&) noexcept = default;
-    string(string const &) noexcept = default;
-    string &operator=(string &&) noexcept = default;
-    ~string() noexcept = default;
-
-    auto set_string(std::u8string_view str) noexcept -> void;
-    auto get_string() const noexcept -> std::u8string;
-
-    auto update_rendering() noexcept -> void;
-
-    auto inline get_array(this auto &&self) noexcept -> auto { return std::span{self.m_vector}; }
-    auto inline get_buffer() const noexcept -> auto const & { return m_buffer; }
-    auto inline get_vertexarray() const noexcept -> auto const & { return m_vertexarray; }
-
-  private:
-    std::vector<character> m_vector{};
-    buffer m_buffer{};
-    vertexarray m_vertexarray{};
-  };
-}
-namespace game::render // using text::
-{
-  using text::font,
-      text::string;
 }
 
 #endif // RENDER_HPP

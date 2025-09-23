@@ -203,10 +203,13 @@ namespace game::utils
       return //
           std::array{range, u8"\uFFFD"sv} |
           std::views::join |
-          std::views::adjacent_transform<4>(
-              [](auto... chars)
+          // std::views::adjacent_transform<4>(
+          std::views::transform(
+              [chars = std::array<char8_t, 4>{0b10'000000, 0b10'000000, 0b10'000000, 0b10'000000}](char8_t c) mutable
               {
-                auto const utf8 = utf8_codepoint{chars...};
+                chars.at(0) = c;
+                std::ranges::rotate(chars, chars.begin() + 1);
+                auto const utf8 = utf8_codepoint{chars};
                 auto const first_byte = utf8.byte_type(utf8.chars.at(0));
                 auto const [take, codepoint] = first_byte.is_continue() ? std::pair{0, U'\0'}
                                                : first_byte.is_error()  ? std::pair{1, U'\uFFFD'}

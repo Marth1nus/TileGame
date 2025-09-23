@@ -6,7 +6,7 @@
 #include <GLES3/gl3.h>
 #endif // defined(USE_GLAD)
 
-#define glCheckError(...) ::game::render::gl::gl_check_error(__VA_ARGS__)
+#define glCheckError ::game::render::gl::gl_check_error
 
 namespace game::render
 {
@@ -32,7 +32,7 @@ namespace game::render::gl
     while ((err = glGetError()) not_eq GL_NO_ERROR)
       utils::errorf("GLES Error 0x%03x %-18s on line %u from function `%s`", err, gl_error_name(err), location.line(), location.function_name());
   }
-  auto static make_shader(int32_t shader_type, std::string_view glsl) -> uint32_t
+  auto static make_shader(GLenum shader_type, std::string_view glsl) -> uint32_t
   {
     auto sources = std::array{/*    */ glsl.data()};
     auto lengths = std::array{(GLsizei)glsl.size()};
@@ -42,7 +42,7 @@ namespace game::render::gl
     if (int status, len; glGetShaderiv(sid, GL_COMPILE_STATUS, &status), not status)
     {
       glGetShaderiv(sid, GL_INFO_LOG_LENGTH, &len);
-      auto log = std::unique_ptr<char[]>(new char[len]);
+      auto log = std::unique_ptr<char[]>(new char[(size_t)len]);
       glGetShaderInfoLog(sid, len, &len, log.get());
       auto shader_type_string = shader_type == GL_FRAGMENT_SHADER ? "Fragment" //
                                 : shader_type == GL_VERTEX_SHADER ? "Vertex"
@@ -66,7 +66,7 @@ namespace game::render::gl
     if (int status, len; glGetProgramiv(pid, GL_LINK_STATUS, &status), not status)
     {
       glGetProgramiv(pid, GL_INFO_LOG_LENGTH, &len);
-      auto log = std::unique_ptr<char[]>(new char[len]);
+      auto log = std::unique_ptr<char[]>(new char[(size_t)len]);
       glGetProgramInfoLog(pid, len, &len, log.get());
       utils::errorf("Program Error: %s", log.get());
       glDeleteProgram(pid), pid = 0;
@@ -93,9 +93,9 @@ namespace game::render::gl
     template <has_GLenum T>
     auto constexpr to_GLenum(T val) noexcept -> GLenum
     {
-      for (auto const [en, gl] : enum_GLenum<T>)
+      for (auto const &[en, gl] : enum_GLenum<T>)
         if (val == en)
-          return gl;
+          return GLenum(gl);
       return GL_NONE;
     }
     template <has_GLenum T>
@@ -108,16 +108,19 @@ namespace game::render::gl
     }
   }
   using tables::to_GLenum, tables::to_enum;
+  auto static constexpr texture_format_details_sizes = std::array<uint8_t, 10>{sizeof(glm::u8), sizeof(glm::i8), sizeof(glm::i16), sizeof(glm::f32), sizeof(glm::u8), sizeof(glm::u16), sizeof(glm::u32), sizeof(glm::i8), sizeof(glm::i16), sizeof(glm::i32)};
+  auto static constexpr texture_format_details_types = std::array<uint16_t, 10>{GL_UNSIGNED_BYTE, GL_BYTE, GL_HALF_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT, GL_UNSIGNED_INT, GL_BYTE, GL_SHORT, GL_INT};
+  auto static constexpr texture_format_details_comp_enums = std::array<uint16_t, 4>{GL_RED, GL_RG, GL_RGB, GL_RGBA};
   /// @return [format_component_GLenum, format_component_count, format_type_GLenum, format_type_size]
   auto constexpr texture_format_details(texture::format f) noexcept -> auto
   {
-    auto const i = (int)f,
-               components = (i >> std::countr_zero(0xf0u)) bitand 0xf,
-               type_index = (i >> std::countr_zero(0x0fu)) bitand 0xf;
-    auto static constexpr sizes = std::array<uint8_t, 10>{sizeof(glm::u8),sizeof(glm::i8),sizeof(glm::i16),sizeof(glm::f32),sizeof(glm::u8),sizeof(glm::u16),sizeof(glm::u32),sizeof(glm::i8),sizeof(glm::i16),sizeof(glm::i32)};
-    auto static constexpr types = std::array<uint16_t, 10>{GL_UNSIGNED_BYTE, GL_BYTE, GL_HALF_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT, GL_UNSIGNED_INT, GL_BYTE, GL_SHORT, GL_INT};
-    auto static constexpr comp_enum = std::array<uint16_t, 4>{GL_RED, GL_RG, GL_RGB, GL_RGBA};
-    return std::tuple{(GLenum)comp_enum.at(components), (size_t)components, (GLenum)types.at(type_index), (size_t)sizes.at(type_index)};
+    auto const i = (size_t)f,
+               components = size_t(i >> std::countr_zero(0xf0u)) bitand 0xf,
+               type_index = size_t(i >> std::countr_zero(0x0fu)) bitand 0xf;
+    auto constexpr &sizes = texture_format_details_sizes;
+    auto constexpr &types = texture_format_details_types;
+    auto constexpr &comp_enums = texture_format_details_comp_enums;
+    return std::tuple{(GLenum)comp_enums.at(components), (size_t)components, (GLenum)types.at(type_index), (size_t)sizes.at(type_index)};
   }
   /// @return [component_count, component_type_GLenum]
   auto constexpr vertex_attrib_details(vertexarray::attribute::type t) noexcept -> std::pair<GLsizei, GLenum>
@@ -126,11 +129,11 @@ namespace game::render::gl
     using enum attrib_type;
     if (range_vec_first <= t and t <= range_vec_last)
     {
-      auto const count = (GLsizei)t bitand 0007;
+      auto const count = GLsizei(t) & 0007;
       if (count < 1 or 4 < count)
         return {0, GL_NONE};
-      auto const base = attrib_type((int)t bitand 0370 bitor 0001);
-      for (auto const [en, gl] : {std::pair{u8, GL_UNSIGNED_BYTE}, std::pair{i8, GL_BYTE}, std::pair{u16, GL_UNSIGNED_SHORT}, std::pair{i16, GL_SHORT}, std::pair{f16, GL_HALF_FLOAT}, std::pair{u32, GL_UNSIGNED_INT}, std::pair{i32, GL_INT}, std::pair{f32, GL_FLOAT}})
+      auto const base = attrib_type((int(t) & 0370) | 0001);
+      for (auto const &[en, gl] : {std::pair{u8, GL_UNSIGNED_BYTE}, std::pair{i8, GL_BYTE}, std::pair{u16, GL_UNSIGNED_SHORT}, std::pair{i16, GL_SHORT}, std::pair{f16, GL_HALF_FLOAT}, std::pair{u32, GL_UNSIGNED_INT}, std::pair{i32, GL_INT}, std::pair{f32, GL_FLOAT}})
         if (en == base)
           return {count, gl};
       return {0, GL_NONE};
@@ -283,7 +286,7 @@ namespace game::render::object // texture
     utils::assertf(m_size.x and m_size.y and m_size.z, "texture size {%u,%u,%u} can not contain 0s", m_size.x, m_size.y, m_size.z);
     auto const target = gl::to_GLenum(m_target),
                format = gl::to_GLenum(m_format);
-    auto const target_component_count = ((int)m_target bitand 0xf0) >> 4;
+    auto const target_component_count = ((uint32_t)m_target & 0xf0u) >> 4u;
     auto const [format_component_GLenum, format_component_count, format_type_GLenum, format_type_size] = gl::texture_format_details(source.format);
     utils::assertf(target_component_count == format_component_count, "texture target expects %i components but format expects %i", target_component_count, format_component_count);
     glBindTexture(target, convert(m_handle.get()));
@@ -293,9 +296,9 @@ namespace game::render::object // texture
     glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT), glCheckError();
     glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_MIRRORED_REPEAT), glCheckError();
     /**/ if (target_component_count == 2)
-      glTexStorage2D(target, 1, format, m_size.x, m_size.y), glCheckError();
+      glTexStorage2D(target, 1, format, (GLsizei)m_size.x, (GLsizei)m_size.y), glCheckError();
     else if (target_component_count == 3)
-      glTexStorage3D(target, 1, format, m_size.x, m_size.y, m_size.z), glCheckError();
+      glTexStorage3D(target, 1, format, (GLsizei)m_size.x, (GLsizei)m_size.y, (GLsizei)m_size.z), glCheckError();
     else
       utils::assertf(false, "Can not %s for texture target: %i", "reserve storage", (int)m_target);
     upload(source);
@@ -311,14 +314,14 @@ namespace game::render::object // texture
     glBindTexture(target, convert(m_handle.get()));
     /**/ if (target_comp == 2)
       glTexSubImage2D(target, 0,
-                      position.x, position.y,
-                      source.size.x, source.size.y,
+                      (GLsizei)position.x, (GLsizei)position.y,
+                      (GLsizei)source.size.x, (GLsizei)source.size.y,
                       format_component_GLenum, format_type_GLenum, source.subpixels.data()),
           glCheckError();
     else if (target_comp == 3)
       glTexSubImage3D(target, 0,
-                      position.x, position.y, position.z,
-                      source.size.x, source.size.y, source.size.z,
+                      (GLsizei)position.x, (GLsizei)position.y, (GLsizei)position.z,
+                      (GLsizei)source.size.x, (GLsizei)source.size.y, (GLsizei)source.size.z,
                       format_component_GLenum, format_type_GLenum, source.subpixels.data()),
           glCheckError();
     else
@@ -351,9 +354,9 @@ namespace game::render::object // vertexarray
     glBindVertexArray(convert(m_handle.get())), glCheckError();
     glBindBuffer(GL_ARRAY_BUFFER, convert(attrib.buffer.get())), glCheckError();
     if (type == GL_HALF_FLOAT or type == GL_FLOAT)
-      glVertexAttribPointer(i, size, type, false, attrib.stride, (void *)(std::uintptr_t)attrib.offset), glCheckError();
+      glVertexAttribPointer(i, size, type, false, (GLsizei)attrib.stride, (void *)(std::uintptr_t)attrib.offset), glCheckError();
     else
-      glVertexAttribIPointer(i, size, type, attrib.stride, (void *)(std::uintptr_t)attrib.offset), glCheckError();
+      glVertexAttribIPointer(i, size, type, (GLsizei)attrib.stride, (void *)(std::uintptr_t)attrib.offset), glCheckError();
     glVertexAttribDivisor(i, attrib.divisor), glCheckError();
     glBindVertexArray(0), glCheckError();
   }
@@ -372,85 +375,5 @@ namespace game::render::object // vertexarray
     else
       glDisableVertexAttribArray(i);
     glBindVertexArray(0), glCheckError();
-  }
-}
-namespace game::render::text // font
-{
-  font::font(glm::u32 max_codepoint, glm::uvec2 glyph_size)
-      : m_texture{},
-        m_glyph_size{glyph_size}
-  {
-    auto max_texture_width = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_width);
-    utils::assertf(max_texture_width > 0, "%s", "Failed to retrieve maximum texture width from OpenGL");
-    auto const max_page_pixels_size = glm::uvec2{max_texture_width, max_texture_width};
-    auto const page_glyphs_size = max_page_pixels_size / glyph_size;
-    auto const page_count = max_codepoint / (1u + COMPONENT_WISE (*)(page_glyphs_size));
-    auto const size = glm::max(glm::uvec3{1, 1, 1}, glm::uvec3{page_glyphs_size, page_count});
-    m_texture = {
-        texture::target::texture2_array,
-        texture::source{
-            .format = texture::format::rgba8,
-            .size = glm::uvec3{glyph_size, 1} * size,
-        },
-    };
-  }
-  auto game::render::text::font::get_atlas_glyphs_position(glm::u32 codepoint) const noexcept -> glm::uvec3
-  {
-    auto const atlas_glyphs_size = get_atlas_glyphs_size();
-    return glm::uvec3{
-        /**/ ((codepoint - 1u) % (atlas_glyphs_size.x * atlas_glyphs_size.y)) % atlas_glyphs_size.x,
-        /**/ ((codepoint - 1u) % (atlas_glyphs_size.x * atlas_glyphs_size.y)) / atlas_glyphs_size.x,
-        /**/ ((codepoint - 1u) / (atlas_glyphs_size.x * atlas_glyphs_size.y)) //
-    };
-  }
-  auto font::upload_glyph(uint32_t codepoint, texture::source source) -> void
-  {
-    auto const size = get_glyph_pixels_size(),
-               position = size * get_atlas_glyphs_position(codepoint);
-    utils::assertf(source.size == size, "Glyph texture source size was wrong. Expected {%u,%u,%u}. Got {%u,%u,%u}", size.x, size.y, size.z, source.size.x, source.size.y, source.size.z);
-    m_texture.upload(source, position);
-  }
-  auto font::upload_glyphs(uint32_t codepoint_begin, texture::source source) -> decltype(codepoint_begin)
-  {
-    auto const glyph_pixels_size = get_glyph_pixels_size();
-    auto const source_glyphs_size = source.size / glyph_pixels_size;
-    auto const [format_component_GLenum, format_component_count, format_type_GLenum, format_type_size] = gl::texture_format_details(source.format);
-    auto const pixel_bytes_size = format_component_count * format_type_size;
-    auto codepoint = codepoint_begin;
-    auto glyph_subpixels = std::vector<std::byte>{};
-    glyph_subpixels.reserve((size_t)COMPONENT_WISE (*)(glyph_pixels_size) * pixel_bytes_size);
-    for (auto i = glm::uvec3{-1, 0, 0},
-              i_size = source_glyphs_size;
-         (/* for x */ ++i.x < i_size.x or (i.x = 0, false)) or
-         (/* for y */ ++i.y < i_size.y or (i.y = 0, false)) or
-         (/* for z */ ++i.z < i_size.z or (i.z = 0, false)) or
-         (/* end   */ false);)
-    {
-      auto const source_glyphs_position = i;
-      glyph_subpixels.clear();
-      for (auto j = glm::uvec3{-1, 0, 0},
-                j_size = glyph_pixels_size;
-           (/* for x */ ++j.x < j_size.x or (j.x = 0, false)) or
-           (/* for y */ ++j.y < j_size.y or (j.y = 0, false)) or
-           (/* for z */ ++j.z < j_size.z or (j.z = 0, false)) or
-           (/* end   */ false);)
-      {
-        auto const source_pixels_position = j + source_glyphs_position * glyph_pixels_size;
-        auto const source_pixels_offset = COMPONENT_WISE (*)(source_pixels_position *glm::uvec3{1, source.size.x, source.size.x * source.size.y});
-        utils::assertf(source_pixels_offset * pixel_bytes_size + pixel_bytes_size <= source.subpixels.size_bytes(), "%s", "source.subpixels overrun");
-        auto const source_pixel_subpixels = source.subpixels.subspan(source_pixels_offset * pixel_bytes_size, pixel_bytes_size);
-        for (auto source_pixel_subpixel : source_pixel_subpixels)
-          glyph_subpixels.push_back(source_pixel_subpixel);
-      }
-      upload_glyph(
-          codepoint++,
-          texture::source{
-              .format = source.format,
-              .size = glyph_pixels_size,
-              .subpixels = glyph_subpixels,
-          });
-    }
-    return codepoint;
   }
 }
