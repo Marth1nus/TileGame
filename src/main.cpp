@@ -1,6 +1,6 @@
 #include "application.hpp"
 
-int main(int c_argc, char const *const *c_argv)
+int main(int, char const *const *)
 {
   return game::application{}.run();
 }

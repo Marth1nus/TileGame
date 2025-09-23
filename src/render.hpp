@@ -303,11 +303,15 @@ namespace game::render::object
                                                                              : 0u,
                        size = 1u + std::countr_zero(sizeof(typename V::value_type)),
                        count = (uint32_t)V::length();
-        if (not((1u <= type and type <= 3u) and (1u <= size and size <= 3u) and (1u <= count and count <= 4u) and not(type == 3u and size == 1u)))
+        if constexpr (not((1u <= type /*  */ and type /*  */ <= 3u) and
+                          (1u <= size /*  */ and size /*  */ <= 3u) and
+                          (1u <= count /* */ and count /* */ <= 4u) and
+                          not(type == 3u and size == 1u)))
           return attribute::type::none;
-        return attribute::type((((uint32_t)type /*  */ bitand 0003u) << std::popcount(0077u)) bitor
-                               (((uint32_t)size /*  */ bitand 0007u) << std::popcount(0007u)) bitor
-                               (((uint32_t)count /* */ bitand 0007u) << std::popcount(0000u)));
+        else
+          return attribute::type{((type /*  */ bitand 0300u) >> std::popcount(0077u)) bitor
+                                 ((size /*  */ bitand 0070u) >> std::popcount(0007u)) bitor
+                                 ((count /* */ bitand 0007u) >> std::popcount(0000u))};
       }();
       template <utils::arithmetic_vec_or_scalar T>
       auto inline constexpr with_type(this attribute self, T *) noexcept -> decltype(self)

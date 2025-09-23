@@ -114,7 +114,7 @@ namespace game::render::gl
     auto const i = (int)f,
                components = (i >> std::countr_zero(0xf0u)) bitand 0xf,
                type_index = (i >> std::countr_zero(0x0fu)) bitand 0xf;
-    auto static constexpr sizes = std::array<uint8_t, 10>{sizeof(glm::u8), sizeof(glm::i8), sizeof(glm::i16), sizeof(glm::f32), sizeof(glm::u8), sizeof(glm::u16), sizeof(glm::u32), sizeof(glm::i8), sizeof(glm::i16), sizeof(glm::i32)};
+    auto static constexpr sizes = std::array<uint8_t, 10>{sizeof(glm::u8),sizeof(glm::i8),sizeof(glm::i16),sizeof(glm::f32),sizeof(glm::u8),sizeof(glm::u16),sizeof(glm::u32),sizeof(glm::i8),sizeof(glm::i16),sizeof(glm::i32)};
     auto static constexpr types = std::array<uint16_t, 10>{GL_UNSIGNED_BYTE, GL_BYTE, GL_HALF_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT, GL_UNSIGNED_INT, GL_BYTE, GL_SHORT, GL_INT};
     auto static constexpr comp_enum = std::array<uint16_t, 4>{GL_RED, GL_RG, GL_RGB, GL_RGBA};
     return std::tuple{(GLenum)comp_enum.at(components), (size_t)components, (GLenum)types.at(type_index), (size_t)sizes.at(type_index)};
@@ -420,23 +420,23 @@ namespace game::render::text // font
     auto codepoint = codepoint_begin;
     auto glyph_subpixels = std::vector<std::byte>{};
     glyph_subpixels.reserve((size_t)COMPONENT_WISE (*)(glyph_pixels_size) * pixel_bytes_size);
-    for (auto it = glm::uvec3{-1, 0, 0},
-              it_size = source_glyphs_size;
-         (/* for x */ ++it.x < it_size.x or (it.x = 0)) or
-         (/* for y */ ++it.y < it_size.y or (it.y = 0)) or
-         (/* for z */ ++it.z < it_size.z or (it.z = 0)) or
-         (/* end */ 0);)
+    for (auto i = glm::uvec3{-1, 0, 0},
+              i_size = source_glyphs_size;
+         (/* for x */ ++i.x < i_size.x or (i.x = 0, false)) or
+         (/* for y */ ++i.y < i_size.y or (i.y = 0, false)) or
+         (/* for z */ ++i.z < i_size.z or (i.z = 0, false)) or
+         (/* end   */ false);)
     {
-      auto const source_glyphs_position = it;
+      auto const source_glyphs_position = i;
       glyph_subpixels.clear();
-      for (auto it = glm::uvec3{-1, 0, 0},
-                it_size = glyph_pixels_size;
-           (/* for x */ ++it.x < it_size.x or (it.x = 0)) or
-           (/* for y */ ++it.y < it_size.y or (it.y = 0)) or
-           (/* for z */ ++it.z < it_size.z or (it.z = 0)) or
-           (/* end */ 0);)
+      for (auto j = glm::uvec3{-1, 0, 0},
+                j_size = glyph_pixels_size;
+           (/* for x */ ++j.x < j_size.x or (j.x = 0, false)) or
+           (/* for y */ ++j.y < j_size.y or (j.y = 0, false)) or
+           (/* for z */ ++j.z < j_size.z or (j.z = 0, false)) or
+           (/* end   */ false);)
       {
-        auto const source_pixels_position = it + source_glyphs_position * glyph_pixels_size;
+        auto const source_pixels_position = j + source_glyphs_position * glyph_pixels_size;
         auto const source_pixels_offset = COMPONENT_WISE (*)(source_pixels_position *glm::uvec3{1, source.size.x, source.size.x * source.size.y});
         utils::assertf(source_pixels_offset * pixel_bytes_size + pixel_bytes_size <= source.subpixels.size_bytes(), "%s", "source.subpixels overrun");
         auto const source_pixel_subpixels = source.subpixels.subspan(source_pixels_offset * pixel_bytes_size, pixel_bytes_size);
@@ -452,51 +452,5 @@ namespace game::render::text // font
           });
     }
     return codepoint;
-  }
-}
-namespace game::render::text // string
-{
-  auto string::set_string(std::u8string_view utf8) noexcept -> void
-  {
-    m_vector.clear();
-    m_vector.reserve(utf8.size() / 2);
-    auto cursor_position = glm::vec2{0.0f, 0.0f};
-    while (not utf8.empty())
-    {
-      auto [codepoint, advance] = utils::to_utf32(utf8);
-      codepoint = codepoint == -1u ? U'?' : codepoint;
-      utf8 = utf8.substr(std::max<size_t>(1u, advance));
-      m_vector.push_back({
-          .codepoint = codepoint,
-          .position = cursor_position,
-          .size = {1, 1},
-      });
-      cursor_position = codepoint == '\n' ? glm::vec2{0.0f, cursor_position.y + 1.0f}
-                                          : cursor_position + glm::vec2{m_vector.back().size.x, 0.0f};
-    }
-  }
-  auto string::get_string() const noexcept -> std::u8string
-  {
-    auto utf8 = std::u8string{};
-    utf8.reserve(m_vector.size() * 2u);
-    for (auto const &character : m_vector)
-      for (auto u8 : utils::to_utf8(character.codepoint))
-        if (u8)
-          utf8.push_back(u8);
-        else
-          break;
-    return utf8;
-  }
-  auto string::update_rendering() noexcept -> void
-  {
-    if (not m_buffer.get_handle())
-      m_buffer = {buffer::target::array, sizeof(character), buffer::usage::static_draw};
-    if (not m_vertexarray.get_handle())
-      m_vertexarray = std::array{
-          vertexarray::attribute{.buffer = m_buffer.get_handle(), .divisor = 1}.with_type(&character::codepoint /* */),
-          vertexarray::attribute{.buffer = m_buffer.get_handle(), .divisor = 1}.with_type(&character::position /*  */),
-          vertexarray::attribute{.buffer = m_buffer.get_handle(), .divisor = 1}.with_type(&character::size /*      */),
-      };
-    m_buffer.upload(m_vector, buffer::usage::static_draw);
   }
 }

@@ -12,11 +12,11 @@ namespace game
 {
   struct application
   {
-    application(application const &) noexcept = delete;
-    application &operator=(application const &) noexcept = delete;
+    /**/ application(application const &) noexcept = delete;
+    auto operator=(application const &) noexcept -> application & = delete;
 
-    application();
-    ~application();
+    /**/ application();
+    /**/ ~application();
     auto run() -> int;
 
   private:

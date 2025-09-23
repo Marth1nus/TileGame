@@ -10,11 +10,11 @@ uniform mat4 projection;
 // out vec3 fragment_pos;
 out vec3 fragment_uv;
 
-uvec2 vertex_poss[4] = uvec2[4](//
-/**/ uvec2(0, 0), //
-/**/ uvec2(1, 0), //
-/**/ uvec2(0, 1), //
-/**/ uvec2(1, 1)  //
+vec2 vertex_poss[4] = vec2[4](//
+/**/ vec2(-0.5f, -0.5f), //
+/**/ vec2(-0.5f, +0.5f), //
+/**/ vec2(+0.5f, -0.5f), //
+/**/ vec2(+0.5f, +0.5f)  //
 );
 
 void main()

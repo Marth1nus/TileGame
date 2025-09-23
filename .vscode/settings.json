@@ -2,6 +2,7 @@
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cmake.useCMakePresets": "always",
   "cSpell.words": [
+    "Allman",
     "assertf",
     "emcc",
     "emcmake",
@@ -24,12 +25,17 @@
     "STREQUAL",
     "uvec",
     "vertexarray",
+    "Wconversion",
     "Wcursorposfun",
     "WEBGL",
     "webglcontextlost",
-    "Wmousebuttonfun"
+    "Wextra",
+    "Wmousebuttonfun",
+    "Wpedantic",
+    "Wsign"
   ],
   "files.associations": {
+    "*.wsv": "csv (whitespace)",
     "algorithm": "cpp",
     "array": "cpp",
     "atomic": "cpp",
@@ -125,7 +131,9 @@
     "semaphore": "cpp",
     "shared_mutex": "cpp",
     "cinttypes": "cpp",
-    "text_encoding": "cpp"
+    "text_encoding": "cpp",
+    "expected": "cpp",
+    "generator": "cpp"
   },
   "liveServer.settings.root": "/pages/"
 }

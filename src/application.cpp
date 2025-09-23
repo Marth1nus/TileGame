@@ -102,7 +102,7 @@ namespace game
     frame_static = &frame;
     auto static constexpr emscripten_main_loop = []
     {
-      if (not (*frame_static)())
+      if (not(*frame_static)())
         emscripten_cancel_main_loop();
     };
     emscripten_set_main_loop(emscripten_main_loop, 0, 1);
@@ -136,7 +136,7 @@ namespace game
     auto frame_buffer_size = glm::ivec2{};
     glfwGetFramebufferSize(m_window.get(), &frame_buffer_size.x, &frame_buffer_size.y);
     glViewport(0, 0, frame_buffer_size.x, frame_buffer_size.y);
-    glClearColor(0.1, 0.1, 0.1, 0.1);
+    glClearColor(0.1f, 0.1f, 0.1f, 0.1f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glEnable(GL_BLEND);
